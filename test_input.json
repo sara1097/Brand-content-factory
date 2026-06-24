@@ -1,13 +1,15 @@
 {
-    "day": 1,
+    "day": 60,
     "campaign_goal": "Increase Awareness",
-    "target_audience": "Students",
-    "platform": "Instagram",
-    "tone": "Friendly",
-    "core_message": "Stay hydrated effortlessly",
+    "target_audience": "Computer Science Students Interested in AI and Machine Learning",
+    "platform": "LinkedIn",
+    "tone": "Professional and Inspirational",
+    "core_message": "Building AI projects and applying concepts in real-world scenarios is one of the most effective ways to develop practical machine learning skills.",
     "top_hooks": [
-        "Still forgetting to drink water?",
-        "Your body deserves better hydration."
+        "Still collecting AI courses without building projects?",
+        "Theory alone won't make you job-ready.",
+        "Every AI project teaches something new.",
+        "Learning by building creates deeper understanding."
     ],
-    "primary_cta": "Learn More"
+    "primary_cta": "Start Building AI Projects"
 }

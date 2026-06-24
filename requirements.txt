@@ -1,4 +1,5 @@
 crewai
 langchain-ollama
 pydantic
-groq python-dotenv
+groq
+python-dotenv

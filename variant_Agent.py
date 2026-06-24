@@ -1,9 +1,16 @@
 import json
 import os
 import re
-import requests
+from dotenv import load_dotenv
+from groq import Groq
 from pydantic import BaseModel
 
+
+load_dotenv()
+
+client = Groq(
+    api_key=os.getenv("GROQ_API_KEY")
+)
 
 class VariantInput(BaseModel):
     day: int
@@ -32,81 +39,117 @@ class ABVariantsOutput(BaseModel):
 with open("test_input.json", "r", encoding="utf-8") as f:
     data = VariantInput(**json.load(f))
 
-
 prompt = f"""
-You are an expert marketing copywriter.
+You are an expert social media copywriter for {data.platform}.
 
-Generate exactly 3 ad variants.
+Your task is to generate 3 COMPLETELY DIFFERENT ad variants for A/B testing.
 
-Use ONLY the information provided.
+Each variant must feel like it was written by a different copywriter using a different persuasion strategy.
 
-Restrictions:
+CAMPAIGN DETAILS:
 
+* Product Message: {data.core_message}
+* Audience: {data.target_audience}
+* Platform: {data.platform}
+* Tone: {data.tone}
+* Goal: {data.campaign_goal}
+* Primary CTA: {data.primary_cta}
+
+INSPIRATION HOOKS (use as inspiration, do NOT copy directly):
+
+{chr(10).join(f'- {h}' for h in data.top_hooks)}
+
+VARIANT A — EMOTIONAL
+
+* Focus on emotions, feelings, aspirations, belonging, motivation, or personal connection.
+* Describe a relatable situation or feeling.
+* Reinforce the campaign message in a motivating way.
+* CTA should be supportive and encouraging.
+
+VARIANT B — RATIONAL
+
+* Focus on logic, practicality, usefulness, and daily relevance.
+* Clearly describe the problem.
+* Explain why the campaign message matters in everyday life.
+* CTA should be practical and action-oriented.
+
+VARIANT C — URGENCY
+
+* Encourage immediate action.
+* Explain why the message matters right now.
+* Encourage a simple next step.
+* Do not use fake urgency.
+* Do not use scarcity.
+* Do not use deadlines.
+* Do not use countdowns.
+* Do not use pressure tactics.
+* CTA should be direct and action-oriented.
+
+CTA RULES
+
+* Every CTA must be unique.
+* Every CTA must match its variant angle.
+* Every CTA must be relevant to the campaign.
+* Generic CTAs are not allowed.
+
+Do NOT use:
+
+* Learn More
+* Act Now
+* Start Today
+* Do It Now
+* Discover More
+* Click Here
+
+GLOBAL RULES
+
+* Hooks must be concise, engaging, and audience-relevant.
+* Bodies must sound like real marketing copy.
+* Hooks must be different across all variants.
+* CTAs must be different across all variants.
+* Use only information provided in the campaign details.
 * Do not invent products.
-* Do not invent offers.
 * Do not invent discounts.
 * Do not invent promotions.
+* Do not invent offers.
 * Do not invent statistics.
 * Do not invent research findings.
 * Do not invent scientific claims.
-* Do not invent features.
-* Do not invent deadlines.
-* Do not invent scarcity.
-* Do not invent benefits that are not explicitly implied by the core message.
-* Do not claim specific outcomes unless explicitly provided.
+* Do not introduce benefits, outcomes, or claims that are not explicitly present in the campaign details.
+* Do not use filler text.
+* Do not repeat the hook inside the body.
 
-If information is missing, keep the content generic.
+GLOBAL RULES
 
-Variant A:
+* Hooks must be concise, engaging, and audience-relevant.
+* Bodies must sound like real marketing copy.
+* Hooks must be different across all variants.
+* CTAs must be different across all variants.
+* Use only information provided in the campaign details.
+* Do not invent products.
+* Do not invent discounts.
+* Do not invent promotions.
+* Do not invent offers.
+* Do not invent statistics.
+* Do not invent research findings.
+* Do not invent scientific claims.
+* Do not introduce benefits, outcomes, or claims that are not explicitly present in the campaign details.
+* Do not use filler text.
+* Do not repeat the hook inside the body.
 
-* Angle: Emotional
-* Focus on feelings, aspirations, motivation, and personal impact.
+LENGTH GUIDELINES
 
-Variant B:
+* Adapt the response length to the amount of information provided.
+* Short campaign inputs should produce concise outputs.
+* Detailed campaign inputs may produce richer outputs.
+* The amount of generated content should be proportional to the amount of campaign information provided.
+* Do not add unnecessary details.
+* Do not remove important context.
+* Keep the copy suitable for social media advertising.
+* Avoid extremely short responses.
+* Avoid unnecessarily long paragraphs.
 
-* Angle: Rational
-* Focus on logic, usefulness, practical value, and clear benefits.
-
-Variant C:
-
-* Angle: Urgency
-* Encourage immediate action.
-* Do not use discounts, offers, deadlines, promotions, or scarcity.
-
-Hook Rules:
-
-* Each hook must be unique.
-* Never reuse a hook.
-* Never copy a hook directly from Top Hooks.
-* Use Top Hooks only as inspiration.
-* Maximum 10 words.
-* Hook cannot be empty.
-* Every field must contain meaningful text.
-
-Body Rules:
-
-* Maximum 25 words.
-* Keep the message concise.
-* Stay aligned with the variant angle.
-
-CTA Rules:
-
-* Maximum 8 words.
-* Use the provided Primary CTA as inspiration.
-* Keep CTAs short and action-oriented.
-
-Campaign Details:
-
-Day: {data.day}
-Campaign Goal: {data.campaign_goal}
-Target Audience: {data.target_audience}
-Platform: {data.platform}
-Tone: {data.tone}
-Core Message: {data.core_message}
-Top Hooks: {data.top_hooks}
-Primary CTA: {data.primary_cta}
-
-Return ONLY valid JSON in this exact format:
+Return ONLY valid JSON using EXACTLY this structure:
 
 {{
 "variant_a": {{
@@ -132,43 +175,33 @@ Return ONLY valid JSON in this exact format:
 
 
 
-print("Calling Ollama...")
+print("Calling Groq...")
 
-response = requests.post(
-    "http://localhost:11434/api/chat",
-    json={
-        "model": "qwen3:4b",
-        "stream": False,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "Return only valid JSON. "
-                    "No explanations. "
-                    "No reasoning. "
-                    "No markdown. "
-                    "No text outside JSON."
-                )
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
-    },
-    timeout=300
+response = client.chat.completions.create(
+    model="llama-3.3-70b-versatile",
+    messages=[
+        {
+            "role": "system",
+            "content": (
+                "You are an expert marketing copywriter specialized in social media advertising. "
+                "Generate persuasive, audience-specific ad copy. "
+                "Follow the requested angle precisely. "
+                "Return only valid JSON. "
+                "No explanations. "
+                "No markdown. "
+                "No text outside JSON."
+            )
+        },
+        {
+            "role": "user",
+            "content": prompt
+        }
+    ],
+    temperature=0.7,
+    max_tokens=800
 )
 
-response.raise_for_status()
-
-result = response.json()
-
-if "message" in result:
-    raw = result["message"].get("content", "")
-elif "response" in result:
-    raw = result.get("response", "")
-else:
-    raw = ""
+raw = response.choices[0].message.content
 
 
 def parse_variants(raw_text: str) -> ABVariantsOutput:
@@ -177,7 +210,9 @@ def parse_variants(raw_text: str) -> ABVariantsOutput:
         "",
         raw_text,
         flags=re.DOTALL
-    ).strip()
+    )
+
+    raw_text = raw_text.strip()
 
     start = raw_text.find("{")
     end = raw_text.rfind("}")
@@ -194,7 +229,16 @@ def parse_variants(raw_text: str) -> ABVariantsOutput:
 
 try:
     variants = parse_variants(raw)
+    for variant in [
+        variants.variant_a,
+        variants.variant_b,
+        variants.variant_c
+    ]:
+        if len(variant.body.split()) < 8:
+            print("Warning: Body too short")
 
+        if len(variant.hook.split()) < 2:
+            print("Warning: Hook too short")
     hooks = [
         variants.variant_a.hook.lower().strip(),
         variants.variant_b.hook.lower().strip(),
