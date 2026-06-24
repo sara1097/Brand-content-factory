@@ -1,8 +1,13 @@
 {
+    "day": 1,
+    "campaign_goal": "Increase Awareness",
+    "target_audience": "Students",
+    "platform": "Instagram",
+    "tone": "Friendly",
     "core_message": "Stay hydrated effortlessly",
     "top_hooks": [
         "Still forgetting to drink water?",
         "Your body deserves better hydration."
     ],
-    "target_audience": "Students"
+    "primary_cta": "Learn More"
 }

@@ -5,6 +5,17 @@ import requests
 from pydantic import BaseModel
 
 
+class VariantInput(BaseModel):
+    day: int
+    campaign_goal: str
+    target_audience: str
+    platform: str
+    tone: str
+    core_message: str
+    top_hooks: list[str]
+    primary_cta: str
+
+
 class AdVariant(BaseModel):
     angle: str
     hook: str
@@ -19,64 +30,114 @@ class ABVariantsOutput(BaseModel):
 
 
 with open("test_input.json", "r", encoding="utf-8") as f:
-    data = json.load(f)
+    data = VariantInput(**json.load(f))
+
 
 prompt = f"""
-Generate 3 short ad variants.
+You are an expert marketing copywriter.
+
+Generate exactly 3 ad variants.
 
 Use ONLY the information provided.
-Do not invent products.
-Do not invent offers.
-Do not invent discounts.
-Do not invent features.
-Do not mention bottles, drinks, apps, products, statistics, research, or claims unless explicitly provided.
 
-Base every variant only on the campaign message and audience.
+Restrictions:
 
-Variant A must be emotional.
-Variant B must be rational.
-Variant C must create urgency.
+* Do not invent products.
+* Do not invent offers.
+* Do not invent discounts.
+* Do not invent promotions.
+* Do not invent statistics.
+* Do not invent research findings.
+* Do not invent scientific claims.
+* Do not invent features.
+* Do not invent deadlines.
+* Do not invent scarcity.
+* Do not invent benefits that are not explicitly implied by the core message.
+* Do not claim specific outcomes unless explicitly provided.
 
-Each variant must be clearly different from the others.
+If information is missing, keep the content generic.
 
-Each hook must be under 10 words.
-Each body must be under 25 words.
-Each CTA must be under 8 words.
+Variant A:
 
-Campaign:
-Message: {data["core_message"]}
-Audience: {data["target_audience"]}
+* Angle: Emotional
+* Focus on feelings, aspirations, motivation, and personal impact.
+
+Variant B:
+
+* Angle: Rational
+* Focus on logic, usefulness, practical value, and clear benefits.
+
+Variant C:
+
+* Angle: Urgency
+* Encourage immediate action.
+* Do not use discounts, offers, deadlines, promotions, or scarcity.
+
+Hook Rules:
+
+* Each hook must be unique.
+* Never reuse a hook.
+* Never copy a hook directly from Top Hooks.
+* Use Top Hooks only as inspiration.
+* Maximum 10 words.
+* Hook cannot be empty.
+* Every field must contain meaningful text.
+
+Body Rules:
+
+* Maximum 25 words.
+* Keep the message concise.
+* Stay aligned with the variant angle.
+
+CTA Rules:
+
+* Maximum 8 words.
+* Use the provided Primary CTA as inspiration.
+* Keep CTAs short and action-oriented.
+
+Campaign Details:
+
+Day: {data.day}
+Campaign Goal: {data.campaign_goal}
+Target Audience: {data.target_audience}
+Platform: {data.platform}
+Tone: {data.tone}
+Core Message: {data.core_message}
+Top Hooks: {data.top_hooks}
+Primary CTA: {data.primary_cta}
 
 Return ONLY valid JSON in this exact format:
 
 {{
-  "variant_a": {{
-    "angle": "Emotional",
-    "hook": "",
-    "body": "",
-    "cta": ""
-  }},
-  "variant_b": {{
-    "angle": "Rational",
-    "hook": "",
-    "body": "",
-    "cta": ""
-  }},
-  "variant_c": {{
-    "angle": "Urgency",
-    "hook": "",
-    "body": "",
-    "cta": ""
-  }}
+"variant_a": {{
+"angle": "Emotional",
+"hook": "",
+"body": "",
+"cta": ""
+}},
+"variant_b": {{
+"angle": "Rational",
+"hook": "",
+"body": "",
+"cta": ""
+}},
+"variant_c": {{
+"angle": "Urgency",
+"hook": "",
+"body": "",
+"cta": ""
+}}
 }}
 """
+
+
 
 print("Calling Ollama...")
 
 response = requests.post(
     "http://localhost:11434/api/chat",
     json={
-        "model": "qwen2.5:3b",
+        "model": "qwen3:4b",
         "stream": False,
         "messages": [
             {
@@ -102,21 +163,12 @@ response.raise_for_status()
 
 result = response.json()
 
-print("\n=== FULL RESPONSE ===")
-print(json.dumps(result, indent=2))
-
 if "message" in result:
     raw = result["message"].get("content", "")
 elif "response" in result:
     raw = result.get("response", "")
 else:
     raw = ""
-
-print("\n=== RAW OUTPUT ===")
-print(repr(raw))
-
-print("\n=== RAW OUTPUT ===")
-print(raw)
 
 
 def parse_variants(raw_text: str) -> ABVariantsOutput:
@@ -142,6 +194,37 @@ def parse_variants(raw_text: str) -> ABVariantsOutput:
 
 try:
     variants = parse_variants(raw)
+
+    hooks = [
+        variants.variant_a.hook.lower().strip(),
+        variants.variant_b.hook.lower().strip(),
+        variants.variant_c.hook.lower().strip()
+    ]
+
+    if len(set(hooks)) != 3:
+        print("\nWarning: Duplicate hooks detected")
+
+    empty_fields = False
+
+    for variant in [
+        variants.variant_a,
+        variants.variant_b,
+        variants.variant_c
+    ]:
+        if not variant.hook.strip():
+            print("Warning: Empty hook detected")
+            empty_fields = True
+
+        if not variant.body.strip():
+            print("Warning: Empty body detected")
+            empty_fields = True
+
+        if not variant.cta.strip():
+            print("Warning: Empty CTA detected")
+            empty_fields = True
+
+    if empty_fields:
+        print("Warning: One or more variants contain empty fields")
 
     print("\n" + "=" * 50)
     print("VARIANTS GENERATED SUCCESSFULLY")
