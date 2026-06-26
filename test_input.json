@@ -1,15 +1,15 @@
 {
-    "day": 60,
-    "campaign_goal": "Increase Awareness",
-    "target_audience": "Computer Science Students Interested in AI and Machine Learning",
-    "platform": "LinkedIn",
-    "tone": "Professional and Inspirational",
-    "core_message": "Building AI projects and applying concepts in real-world scenarios is one of the most effective ways to develop practical machine learning skills.",
+    "day": 25,
+    "campaign_goal": "Increase Product Awareness",
+    "target_audience": "People Who Enjoy Walking, Running, and Everyday Comfort",
+    "platform": "Instagram",
+    "tone": "Energetic, Modern, and Motivational",
+    "core_message": "StrideX is a lightweight sneaker designed to provide everyday comfort, breathable materials, and versatile style for daily activities.",
     "top_hooks": [
-        "Still collecting AI courses without building projects?",
-        "Theory alone won't make you job-ready.",
-        "Every AI project teaches something new.",
-        "Learning by building creates deeper understanding."
+        "Comfort should move with you.",
+        "Every step deserves better support.",
+        "Your everyday shoes should do more.",
+        "Move freely from morning to night."
     ],
-    "primary_cta": "Start Building AI Projects"
+    "primary_cta": "Discover StrideX"
 }

@@ -1,16 +1,19 @@
 import json
 import os
 import re
+import time
 from dotenv import load_dotenv
 from groq import Groq
 from pydantic import BaseModel
-
 
 load_dotenv()
 
 client = Groq(
     api_key=os.getenv("GROQ_API_KEY")
 )
+
+
+# ─── Data Models ─────────────────────────────────────────────────────────────
 
 class VariantInput(BaseModel):
     day: int
@@ -36,271 +39,211 @@ class ABVariantsOutput(BaseModel):
     variant_c: AdVariant
 
 
+# ─── Load Input ───────────────────────────────────────────────────────────────
+
 with open("test_input.json", "r", encoding="utf-8") as f:
     data = VariantInput(**json.load(f))
 
-prompt = f"""
-You are an expert social media copywriter for {data.platform}.
 
-Your task is to generate 3 COMPLETELY DIFFERENT ad variants for A/B testing.
+# ─── Prompt Builder ───────────────────────────────────────────────────────────
 
-Each variant must feel like it was written by a different copywriter using a different persuasion strategy.
+def build_prompt(data: VariantInput) -> str:
+    hooks_text = "\n".join(f"- {h}" for h in data.top_hooks)
+
+    return f"""You are a senior social media copywriter for {data.platform}.
+
+Generate 3 COMPLETELY DIFFERENT ad variants for A/B testing.
+Each variant must use a distinct persuasion strategy, as if written by a different copywriter.
 
 CAMPAIGN DETAILS:
+- Product Message: {data.core_message}
+- Audience: {data.target_audience}
+- Platform: {data.platform}
+- Tone: {data.tone}
+- Goal: {data.campaign_goal}
+- Primary CTA Reference: {data.primary_cta}
 
-* Product Message: {data.core_message}
-* Audience: {data.target_audience}
-* Platform: {data.platform}
-* Tone: {data.tone}
-* Goal: {data.campaign_goal}
-* Primary CTA: {data.primary_cta}
+INSPIRATION HOOKS (use as creative inspiration only — do NOT copy):
+{hooks_text}
 
-INSPIRATION HOOKS (use as inspiration, do NOT copy directly):
-
-{chr(10).join(f'- {h}' for h in data.top_hooks)}
+VARIANT INSTRUCTIONS:
 
 VARIANT A — EMOTIONAL
-
-* Focus on emotions, feelings, aspirations, belonging, motivation, or personal connection.
-* Describe a relatable situation or feeling.
-* Reinforce the campaign message in a motivating way.
-* CTA should be supportive and encouraging.
+- Appeal to feelings, aspirations, personal connection, or belonging.
+- Open with a relatable situation or human moment.
+- Reinforce the product message through emotional resonance.
+- CTA must feel supportive and encouraging.
 
 VARIANT B — RATIONAL
-
-* Focus on logic, practicality, usefulness, and daily relevance.
-* Clearly describe the problem.
-* Explain why the campaign message matters in everyday life.
-* CTA should be practical and action-oriented.
+- Lead with a clear problem the audience faces daily.
+- Focus on usefulness, logic, and tangible relevance.
+- CTA must be practical and action-oriented.
+- Explain practically how the product relates to the audience's needs using only the provided campaign information.
 
 VARIANT C — URGENCY
+- Frame the message around immediate relevance (not fake deadlines or scarcity).
+- Highlight why taking action now is relevant based only on the campaign details.
+- Motivate a confident next step.
+- CTA must be direct and momentum-driven.
 
-* Encourage immediate action.
-* Explain why the message matters right now.
-* Encourage a simple next step.
-* Do not use fake urgency.
-* Do not use scarcity.
-* Do not use deadlines.
-* Do not use countdowns.
-* Do not use pressure tactics.
-* CTA should be direct and action-oriented.
+STRICT RULES:
+- All 3 hooks must be completely different from each other.
+- All 3 CTAs must be unique and angle-specific.
+- Do NOT use: Learn More / Act Now / Start Today / Do It Now / Discover More / Click Here
+- Do NOT invent discounts, statistics, promotions, or claims not in the campaign details.
+- Do NOT repeat the hook inside the body.
+- Body must be 2–4 sentences. Hook must be 1 punchy sentence.
+- Write copy that feels real, human, and platform-native for {data.platform}.
+- Do NOT rephrase the same idea twice within the same body. 
+- Each sentence must add NEW information or a NEW angle.
 
-CTA RULES
-
-* Every CTA must be unique.
-* Every CTA must match its variant angle.
-* Every CTA must be relevant to the campaign.
-* Generic CTAs are not allowed.
-
-Do NOT use:
-
-* Learn More
-* Act Now
-* Start Today
-* Do It Now
-* Discover More
-* Click Here
-
-GLOBAL RULES
-
-* Hooks must be concise, engaging, and audience-relevant.
-* Bodies must sound like real marketing copy.
-* Hooks must be different across all variants.
-* CTAs must be different across all variants.
-* Use only information provided in the campaign details.
-* Do not invent products.
-* Do not invent discounts.
-* Do not invent promotions.
-* Do not invent offers.
-* Do not invent statistics.
-* Do not invent research findings.
-* Do not invent scientific claims.
-* Do not introduce benefits, outcomes, or claims that are not explicitly present in the campaign details.
-* Do not use filler text.
-* Do not repeat the hook inside the body.
-
-GLOBAL RULES
-
-* Hooks must be concise, engaging, and audience-relevant.
-* Bodies must sound like real marketing copy.
-* Hooks must be different across all variants.
-* CTAs must be different across all variants.
-* Use only information provided in the campaign details.
-* Do not invent products.
-* Do not invent discounts.
-* Do not invent promotions.
-* Do not invent offers.
-* Do not invent statistics.
-* Do not invent research findings.
-* Do not invent scientific claims.
-* Do not introduce benefits, outcomes, or claims that are not explicitly present in the campaign details.
-* Do not use filler text.
-* Do not repeat the hook inside the body.
-
-LENGTH GUIDELINES
-
-* Adapt the response length to the amount of information provided.
-* Short campaign inputs should produce concise outputs.
-* Detailed campaign inputs may produce richer outputs.
-* The amount of generated content should be proportional to the amount of campaign information provided.
-* Do not add unnecessary details.
-* Do not remove important context.
-* Keep the copy suitable for social media advertising.
-* Avoid extremely short responses.
-* Avoid unnecessarily long paragraphs.
-
-Return ONLY valid JSON using EXACTLY this structure:
+Return ONLY this valid JSON — no markdown, no explanation, no text outside JSON:
 
 {{
-"variant_a": {{
-"angle": "Emotional",
-"hook": "",
-"body": "",
-"cta": ""
-}},
-"variant_b": {{
-"angle": "Rational",
-"hook": "",
-"body": "",
-"cta": ""
-}},
-"variant_c": {{
-"angle": "Urgency",
-"hook": "",
-"body": "",
-"cta": ""
-}}
-}}
-"""
+  "variant_a": {{"angle": "Emotional", "hook": "", "body": "", "cta": ""}},
+  "variant_b": {{"angle": "Rational",  "hook": "", "body": "", "cta": ""}},
+  "variant_c": {{"angle": "Urgency",   "hook": "", "body": "", "cta": ""}}
+}}"""
 
 
-
-print("Calling Groq...")
-
-response = client.chat.completions.create(
-    model="llama-3.3-70b-versatile",
-    messages=[
-        {
-            "role": "system",
-            "content": (
-                "You are an expert marketing copywriter specialized in social media advertising. "
-                "Generate persuasive, audience-specific ad copy. "
-                "Follow the requested angle precisely. "
-                "Return only valid JSON. "
-                "No explanations. "
-                "No markdown. "
-                "No text outside JSON."
-            )
-        },
-        {
-            "role": "user",
-            "content": prompt
-        }
-    ],
-    temperature=0.7,
-    max_tokens=800
-)
-
-raw = response.choices[0].message.content
-
+# ─── Parser ───────────────────────────────────────────────────────────────────
 
 def parse_variants(raw_text: str) -> ABVariantsOutput:
-    raw_text = re.sub(
-        r"<think>.*?</think>",
-        "",
-        raw_text,
-        flags=re.DOTALL
-    )
-
+    # Strip thinking tags (some models emit these)
+    raw_text = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL)
+    # Strip markdown code fences if present
+    raw_text = re.sub(r"```(?:json)?", "", raw_text)
     raw_text = raw_text.strip()
 
     start = raw_text.find("{")
     end = raw_text.rfind("}")
 
     if start == -1 or end == -1:
-        raise ValueError("No JSON object found")
+        raise ValueError("No JSON object found in response")
 
     json_text = raw_text[start:end + 1]
-
     parsed = json.loads(json_text)
-
     return ABVariantsOutput(**parsed)
 
 
-try:
-    variants = parse_variants(raw)
-    for variant in [
-        variants.variant_a,
-        variants.variant_b,
-        variants.variant_c
-    ]:
-        if len(variant.body.split()) < 8:
-            print("Warning: Body too short")
+# ─── API Call with Retry ──────────────────────────────────────────────────────
 
-        if len(variant.hook.split()) < 2:
-            print("Warning: Hook too short")
-    hooks = [
-        variants.variant_a.hook.lower().strip(),
-        variants.variant_b.hook.lower().strip(),
-        variants.variant_c.hook.lower().strip()
+def call_groq_with_retry(prompt: str, max_attempts: int = 3) -> ABVariantsOutput:
+    last_error = None
+
+    for attempt in range(1, max_attempts + 1):
+        print(f"Calling Groq... (attempt {attempt}/{max_attempts})")
+        try:
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an expert marketing copywriter for social media advertising. "
+                            "Generate persuasive, audience-specific ad copy for the requested angles. "
+                            "Return ONLY valid JSON. No markdown. No explanations. No text outside JSON."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.5,
+                max_tokens=1500
+            )
+
+            raw = response.choices[0].message.content
+            return parse_variants(raw)
+
+        except Exception as e:
+            last_error = e
+            print(f"Attempt {attempt} failed: {e}")
+            if attempt < max_attempts:
+                time.sleep(2)
+
+    raise RuntimeError(f"All {max_attempts} attempts failed. Last error: {last_error}")
+
+
+# ─── Quality Checks ───────────────────────────────────────────────────────────
+
+BANNED_CTAS = {"learn more", "act now", "start today", "do it now", "discover more", "click here"}
+
+def run_quality_checks(variants: ABVariantsOutput) -> bool:
+    all_ok = True
+    items = [
+        ("A - Emotional", variants.variant_a),
+        ("B - Rational",  variants.variant_b),
+        ("C - Urgency",   variants.variant_c),
     ]
 
+    for label, v in items:
+        if not v.hook.strip():
+            print(f"[WARN] Variant {label}: empty hook")
+            all_ok = False
+        elif len(v.hook.split()) < 2:
+            print(f"[WARN] Variant {label}: hook too short ({v.hook!r})")
+
+        if not v.body.strip():
+            print(f"[WARN] Variant {label}: empty body")
+            all_ok = False
+        elif len(v.body.split()) < 8:
+            print(f"[WARN] Variant {label}: body too short")
+
+        if not v.cta.strip():
+            print(f"[WARN] Variant {label}: empty CTA")
+            all_ok = False
+        elif v.cta.lower().strip() in BANNED_CTAS:
+            print(f"[WARN] Variant {label}: banned generic CTA used ({v.cta!r})")
+
+        if v.hook.lower() in v.body.lower():
+            print(f"[WARN] Variant {label}: hook repeated inside body")
+
+    hooks = [v.hook.lower().strip() for _, v in items]
     if len(set(hooks)) != 3:
-        print("\nWarning: Duplicate hooks detected")
+        print("[WARN] Duplicate hooks detected across variants")
+        all_ok = False
 
-    empty_fields = False
+    ctas = [v.cta.lower().strip() for _, v in items]
+    if len(set(ctas)) != 3:
+        print("[WARN] Duplicate CTAs detected across variants")
+        all_ok = False
 
-    for variant in [
-        variants.variant_a,
-        variants.variant_b,
-        variants.variant_c
-    ]:
-        if not variant.hook.strip():
-            print("Warning: Empty hook detected")
-            empty_fields = True
+    return all_ok
 
-        if not variant.body.strip():
-            print("Warning: Empty body detected")
-            empty_fields = True
 
-        if not variant.cta.strip():
-            print("Warning: Empty CTA detected")
-            empty_fields = True
+# ─── Main ─────────────────────────────────────────────────────────────────────
 
-    if empty_fields:
-        print("Warning: One or more variants contain empty fields")
+def main():
+    prompt = build_prompt(data)
+    variants = call_groq_with_retry(prompt)
+
+    print()
+    quality_ok = run_quality_checks(variants)
 
     print("\n" + "=" * 50)
-    print("VARIANTS GENERATED SUCCESSFULLY")
+    print("VARIANTS GENERATED SUCCESSFULLY" if quality_ok else "VARIANTS GENERATED (WITH WARNINGS)")
     print("=" * 50)
 
     for label, variant in [
         ("A - Emotional", variants.variant_a),
-        ("B - Rational", variants.variant_b),
-        ("C - Urgency", variants.variant_c)
+        ("B - Rational",  variants.variant_b),
+        ("C - Urgency",   variants.variant_c),
     ]:
         print(f"\nVariant {label}")
-        print(f"Hook: {variant.hook}")
-        print(f"Body: {variant.body}")
-        print(f"CTA : {variant.cta}")
+        print(f"Hook : {variant.hook}")
+        print(f"Body : {variant.body}")
+        print(f"CTA  : {variant.cta}")
 
     os.makedirs("outputs", exist_ok=True)
+    output_path = "outputs/variants_output.json"
 
-    with open(
-        "outputs/variants_output.json",
-        "w",
-        encoding="utf-8"
-    ) as f:
-        json.dump(
-            variants.model_dump(),
-            f,
-            indent=2,
-            ensure_ascii=False
-        )
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(variants.model_dump(), f, indent=2, ensure_ascii=False)
 
-    print("\nSaved to outputs/variants_output.json")
+    print(f"\nSaved to {output_path}")
 
-except Exception as e:
-    print(f"\nParse Error: {e}")
-    print("\nRaw Response:")
-    print(raw)
+
+if __name__ == "__main__":
+    main()
