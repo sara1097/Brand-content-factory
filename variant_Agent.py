@@ -135,7 +135,7 @@ def call_groq_with_retry(prompt: str, max_attempts: int = 3) -> ABVariantsOutput
         print(f"Calling Groq... (attempt {attempt}/{max_attempts})")
         try:
             response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model="qwen/qwen3-32b",
                 messages=[
                     {
                         "role": "system",
