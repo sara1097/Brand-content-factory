@@ -1,0 +1,74 @@
+{
+  "product_analysis": {
+    "product_name": "Apple AirPods Pro",
+    "category": "Electronics/Audio",
+    "key_features": [
+      "Active Noise Cancellation",
+      "30-hour Battery Life",
+      "Wireless Connectivity",
+      "Charging Case"
+    ],
+    "visual_attributes": {
+      "color": "White",
+      "design_style": "Modern/Minimalist",
+      "target_segment": "Premium",
+      "build_quality": "Sleek, glossy white plastic finish"
+    },
+    "extracted_from_image": "The image features a white wireless earbud charging case with two buds nestled inside, positioned centrally. Two additional loose white earbuds with visible stems are lying in the foreground. To the left, a white retail box with a silver Apple logo is partially visible. To the right, a pink notebook or folder rests on the surface. The lighting is soft, highlighting the glossy texture of the earbuds and case."
+  },
+  "market_research": {
+    "market_context": {
+      "price_segments": [
+        "budget: 2000-3000 EGP",
+        "mid: 4000-6000 EGP",
+        "premium: 11000-14000 EGP"
+      ],
+      "competition_level": "high",
+      "trend": "Growing demand for premium audio among tech-savvy youth and professionals seeking status symbols"
+    },
+    "audience_persona": {
+      "age_range": "18-35",
+      "lifestyle": "Highly connected, active on social media, values aesthetics and brand prestige, often works from home or travels frequently",
+      "behavior": "Researches extensively on social media before purchasing, trusts influencers, price-sensitive but willing to pay for authenticity",
+      "budget_sensitivity": "medium"
+    },
+    "customer_psychology": {
+      "pain_points": [
+        "Fear of purchasing counterfeit products",
+        "High price relative to income",
+        "Battery anxiety during long commutes"
+      ],
+      "desires": [
+        "Premium sound quality for noise-canceling environments",
+        "Status symbol to match iPhone ecosystem",
+        "Seamless connectivity with Apple devices"
+      ],
+      "fears": [
+        "Device failure due to poor build quality",
+        "Being ripped off by unauthorized sellers"
+      ]
+    },
+    "competitive_analysis": {
+      "common_strengths": [
+        "Strong brand recognition",
+        "Ecosystem integration with iPhone"
+      ],
+      "common_weaknesses": [
+        "High import costs",
+        "Limited availability in some areas",
+        "Warranty concerns"
+      ],
+      "market_gap": "Education on proper usage and maintenance to reduce fear of damage, plus verified official warranty channels"
+    },
+    "product_insight": {
+      "core_value": "Seamless audio experience with premium noise cancellation",
+      "unique_angle": "Superior ANC technology compared to local competitors like Samsung or Xiaomi",
+      "emotional_hook": "Elevate your presence in a noisy world, own the silence"
+    },
+    "platform_strategy": {
+      "tiktok": "Short unboxing videos, 'Life with AirPods' challenges, tech influencer reviews focusing on ANC performance",
+      "instagram": "Aesthetic product shots, lifestyle integration posts, influencer takeovers, high-quality carousel ads",
+      "facebook": "Targeted ads to professionals, community group engagement, official store pages for warranty verification"
+    }
+  }
+}

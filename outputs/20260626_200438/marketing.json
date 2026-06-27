@@ -1,0 +1,268 @@
+{
+    "metadata": {
+        "agent": "marketing_strategy",
+        "schema_version": "1.0.0",
+        "status": "success"
+    },
+    "executive_strategy": {
+        "attributes": {
+            "business_goal": "Increase Sales",
+            "marketing_goal": "Position the new T-Shirt product as a mid-range option with verified durability and transparent material composition",
+            "success_definition": "Achieve a sales revenue of 100,000 EGP within the first month of launch",
+            "strategic_priority": "High"
+        },
+        "assessment": {
+            "overall_strategy_strength": "Moderate",
+            "market_readiness": "Low"
+        },
+        "evidence": [
+            "Market gap for mid-range options with verified durability and transparent material composition"
+        ],
+        "reliability": 0.7
+    },
+    "stp_analysis": {
+        "attributes": {
+            "segmentation": [
+                "Demographics: Young adults (18-35) in urban areas",
+                "Psychographics: Individuals prioritizing quality and durability"
+            ],
+            "target_audience": [
+                "Fashion-conscious individuals",
+                "Environmentally aware consumers"
+            ],
+            "positioning_statement": "A mid-range, high-quality T-Shirt with verified durability and transparent material composition",
+            "value_proposition": "Durable, comfortable, and sustainable apparel for the modern Egyptian consumer"
+        },
+        "assessment": {
+            "target_market_fit": "Moderate"
+        },
+        "evidence": [
+            "Competitor analysis indicating a market gap for mid-range options"
+        ],
+        "reliability": 0.6
+    },
+    "swot_analysis": {
+        "attributes": {
+            "strengths": [
+                "Unique selling proposition (USP) of verified durability and transparent material composition",
+                "Potential for strong brand identity"
+            ],
+            "weaknesses": [
+                "Low construction quality scores",
+                "Limited brand recognition"
+            ],
+            "opportunities": [
+                "Growing demand for sustainable and durable apparel",
+                "Expanding e-commerce market in Egypt"
+            ],
+            "threats": [
+                "Intense competition from generic market players",
+                "Fluctuating cotton prices"
+            ]
+        },
+        "assessment": {
+            "competitive_position": "Weak"
+        },
+        "evidence": [
+            "Competitor analysis and market trends"
+        ],
+        "reliability": 0.65
+    },
+    "pricing_strategy": {
+        "attributes": {
+            "pricing_model": "Penetration pricing",
+            "recommended_price_range": "200-400 EGP",
+            "pricing_position": "Competitive",
+            "discount_strategy": "Limited time discounts for first-time customers",
+            "bundling_strategy": "Bundle with other apparel items for discounted prices"
+        },
+        "assessment": {
+            "pricing_competitiveness": "Moderate"
+        },
+        "evidence": [
+            "Competitor pricing analysis"
+        ],
+        "reliability": 0.55
+    },
+    "go_to_market_strategy": {
+        "attributes": {
+            "launch_strategy": "Online launch through social media and e-commerce platforms",
+            "market_entry_plan": "Partner with local influencers and bloggers for product promotion",
+            "customer_acquisition_strategy": "Offer limited time discounts and free shipping for first-time customers",
+            "retention_strategy": "Implement a loyalty program with rewards for repeat customers"
+        },
+        "assessment": {
+            "execution_feasibility": "Moderate"
+        },
+        "evidence": [
+            "Market trends and competitor analysis"
+        ],
+        "reliability": 0.6
+    },
+    "channel_strategy": {
+        "attributes": {
+            "offline_channels": [
+                "Partner with local retailers for in-store promotions"
+            ],
+            "online_channels": [
+                "Social media platforms (Facebook, Instagram, Twitter)",
+                "E-commerce website"
+            ],
+            "marketplaces": [
+                "Jumia Egypt"
+            ],
+            "social_platforms": [
+                "Facebook",
+                "Instagram"
+            ],
+            "recommended_channel_mix": "60% online, 40% offline"
+        },
+        "assessment": {
+            "channel_effectiveness": "Moderate"
+        },
+        "evidence": [
+            "Market trends and competitor analysis"
+        ],
+        "reliability": 0.65
+    },
+    "content_strategy": {
+        "attributes": {
+            "brand_message": "Sustainable and durable apparel for the modern Egyptian consumer",
+            "brand_voice": "Friendly, approachable, and environmentally aware",
+            "content_pillars": [
+                "Sustainability",
+                "Durability",
+                "Comfort"
+            ],
+            "content_formats": [
+                "Blog posts",
+                "Social media posts",
+                "Influencer partnerships"
+            ],
+            "storytelling_angle": "Highlighting the benefits of sustainable and durable apparel"
+        },
+        "assessment": {
+            "engagement_potential": "High"
+        },
+        "evidence": [
+            "Market trends and competitor analysis"
+        ],
+        "reliability": 0.7
+    },
+    "campaign_strategy": {
+        "attributes": {
+            "launch_campaign": "Social media campaign highlighting the unique selling proposition (USP) of verified durability and transparent material composition",
+            "seasonal_campaigns": [
+                "Summer sale",
+                "Winter promotion"
+            ],
+            "campaign_ideas": [
+                "Influencer partnerships",
+                "User-generated content campaigns"
+            ],
+            "promotional_tactics": [
+                "Limited time discounts",
+                "Free shipping"
+            ],
+            "call_to_actions": [
+                "Visit website",
+                "Make a purchase"
+            ]
+        },
+        "assessment": {
+            "campaign_strength": "Moderate"
+        },
+        "evidence": [
+            "Market trends and competitor analysis"
+        ],
+        "reliability": 0.6
+    },
+    "budget_strategy": {
+        "attributes": {
+            "digital_budget_percentage": "60%",
+            "offline_budget_percentage": "40%",
+            "estimated_budget_level": "50,000 EGP",
+            "budget_allocation": [
+                "Social media advertising (30%)",
+                "Influencer partnerships (20%)",
+                "Content creation (20%)",
+                "Offline promotions (30%)"
+            ]
+        },
+        "assessment": {
+            "budget_efficiency": "Moderate"
+        },
+        "evidence": [
+            "Market trends and competitor analysis"
+        ],
+        "reliability": 0.65
+    },
+    "kpi_framework": {
+        "attributes": {
+            "primary_kpis": [
+                "Sales revenue",
+                "Website traffic"
+            ],
+            "secondary_kpis": [
+                "Social media engagement",
+                "Customer acquisition cost"
+            ],
+            "success_metrics": [
+                "Customer retention rate",
+                "Average order value"
+            ],
+            "reporting_frequency": "Monthly"
+        },
+        "assessment": {
+            "measurement_quality": "High"
+        },
+        "evidence": [
+            "Market trends and competitor analysis"
+        ],
+        "reliability": 0.75
+    },
+    "risk_management": {
+        "attributes": {
+            "business_risks": [
+                "Intense competition",
+                "Fluctuating cotton prices"
+            ],
+            "marketing_risks": [
+                "Limited brand recognition",
+                "Ineffective social media campaigns"
+            ],
+            "competitive_risks": [
+                "Generic market players",
+                "New entrants in the market"
+            ],
+            "mitigation_actions": [
+                "Conduct market research to stay ahead of competitors",
+                "Diversify marketing channels to reduce dependence on social media"
+            ]
+        },
+        "assessment": {
+            "overall_risk_level": "Moderate"
+        },
+        "evidence": [
+            "Market trends and competitor analysis"
+        ],
+        "reliability": 0.7
+    },
+    "data_sources": {
+        "used_product_intelligence": true,
+        "used_market_intelligence": true,
+        "used_business_constraints": true,
+        "country": "Egypt",
+        "budget": "Low",
+        "campaign_duration": "1 Month",
+        "primary_goal": "Increase Sales",
+        "brand_stage": "New Product Launch"
+    },
+    "strategy_score": {
+        "overall_score": null,
+        "market_fit": null,
+        "execution_feasibility": null,
+        "competitive_advantage": null,
+        "confidence": null
+    }
+}
