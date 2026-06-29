@@ -55,9 +55,13 @@ def _ensure_shape(data: dict) -> dict:
 # ============================================================
 
 def generate_report(
-    product_intelligence: dict,
-    market_intelligence: dict,
-    marketing_strategy: dict,
+    product_intelligence,
+    market_intelligence,
+    marketing_strategy,
+    variants: dict | None = None,
+    compliance: dict | None = None,
+    content: dict | None = None,
+    video: dict | None = None,
 ) -> dict:
     """
     Generate the final executive business report.
@@ -77,6 +81,13 @@ def generate_report(
         return {
             "error": "Missing Marketing Strategy"
         }
+    if variants is None:
+        variants = {}
+
+    if compliance is None:
+        compliance = {}
+    if content is None:
+        content = {}
 
     agent = BaseAgent(
         system_prompt=REPORT_SYSTEM_PROMPT,
@@ -103,10 +114,45 @@ MARKETING STRATEGY
 {json.dumps(marketing_strategy, indent=2, ensure_ascii=False)}
 
 ==================================================
+AD VARIANTS
+==================================================
+
+{json.dumps(variants, indent=2, ensure_ascii=False)}
+
+==================================================
+COMPLIANCE REVIEW
+==================================================
+
+{json.dumps(compliance, indent=2, ensure_ascii=False)}
+
+==================================================
+CONTENT CALENDAR
+==================================================
+
+{json.dumps(content, indent=2, ensure_ascii=False)}
+
+==================================================
 TASK
 ==================================================
 
-Generate a complete Executive Business Report.
+Generate the FINAL Executive Business Report.
+
+Use ALL available information:
+
+• Product Intelligence
+• Market Intelligence
+• Marketing Strategy
+• Generated Ad Variants
+• Compliance Review
+
+The report must summarize:
+
+• Product strengths
+• Market opportunities
+• Marketing strategy
+• Generated campaigns
+• Compliance observations
+• Final approved marketing direction
 
 The report must include:
 
@@ -155,9 +201,12 @@ Return ONLY valid JSON.
     # ============================================================
 
     result["data_sources"] = {
-        "used_product_intelligence": True,
-        "used_market_intelligence": True,
-        "used_marketing_strategy": True
-    }
+    "used_product_intelligence": True,
+    "used_market_intelligence": True,
+    "used_marketing_strategy": True,
+    "used_variant_agent": bool(variants),
+    "used_compliance_agent": bool(compliance),
+    "used_content_agent": bool(content),
+}
 
     return result

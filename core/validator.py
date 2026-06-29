@@ -45,6 +45,23 @@ REQUIRED_KEYS = {
         "kpi_framework",
         "risk_management"
     ],
+    "variant": [
+    "metadata",
+    "variant_a",
+    "variant_b",
+    "variant_c"
+],
+"compliance": [
+
+    "metadata",
+
+    "variant_a",
+
+    "variant_b",
+
+    "variant_c"
+
+],
     "report": [
         "metadata",
         "executive_summary",

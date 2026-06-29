@@ -4,8 +4,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from urllib.parse import urlparse
-
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 
 TRUSTED_EGYPTIAN_STORES = {

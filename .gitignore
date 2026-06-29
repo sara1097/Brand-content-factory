@@ -1,31 +1,25 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-
-# Virtual Environment
 venv/
+.venv/
+
+__pycache__/
+*.pyc
+
 .env
 
-# IDE
-.vscode/
-.idea/
-
-# Streamlit
-.streamlit/secrets.toml
-
-# Chroma
-data/chroma_db/
-
-# Outputs
+outputs/
 data/outputs/
 
-# Cache
-.cache/
+.streamlit/
 
-# Logs
 *.log
 
-# OS
-.DS_Store
-Thumbs.db
+*.pdf
+
+*.mp4
+
+*.png
+*.jpg
+*.jpeg
+
+.idea/
+.vscode/

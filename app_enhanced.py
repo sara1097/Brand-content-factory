@@ -25,12 +25,17 @@ st.set_page_config(
 # ============================================================
 # IMPORT AGENTS
 # ============================================================
+from agents.variant_agent import generate_variants
 from agents.product_agent import analyze_product
 from agents.research_agent import research_market
 from agents.marketing_strategy_agent import build_marketing_strategy
 from agents.report_agent import generate_report
 from reports.pdf_generator import generate_pdf
 from reports.report_formatter import format_report
+from agents.compliance_agent import generate_compliance
+from agents.content_agent import generate_content
+from agents.video_agent import generate_video_assets
+
 # ============================================================
 # OUTPUT DIRECTORY
 # ============================================================
@@ -44,9 +49,13 @@ DEFAULT_STATE = {
     "product": None,
     "research": None,
     "marketing": None,
+    "variants": None,
     "report": None,
     "image_path": None,
     "description": "",
+    "compliance": None,
+    "content": None,
+    "video": None,
 }
 
 for key, value in DEFAULT_STATE.items():
@@ -151,7 +160,11 @@ with col2:
         st.session_state.product = None
         st.session_state.research = None
         st.session_state.marketing = None
+        st.session_state.variants = None
         st.session_state.report = None
+        st.session_state.compliance = None
+        st.session_state.content = None
+        st.session_state.video = None
         st.rerun()
 
 # ============================================================
@@ -233,6 +246,102 @@ if st.session_state.marketing:
     st.json(st.session_state.marketing)
 
 # ============================================================
+# VARIANT GENERATION
+# ============================================================
+st.divider()
+st.subheader("🎯 Marketing Variants")
+
+if st.button("✨ Generate Ad Variants", use_container_width=True):
+    if st.session_state.marketing is None:
+        st.warning("Generate Marketing Strategy first.")
+    else:
+        with st.spinner("Generating Marketing Variants..."):
+            try:
+                variants = generate_variants(st.session_state.marketing)
+                if "error" in variants:
+                    st.error(variants["error"])
+                else:
+                    st.session_state.variants = variants
+                    st.success("Marketing Variants generated successfully.")
+            except Exception as exc:
+                st.exception(exc)
+
+if st.session_state.variants:
+    st.subheader("🎨 Generated Variants")
+    st.json(st.session_state.variants)
+
+# ============================================================
+# COMPLIANCE REVIEW
+# ============================================================
+st.divider()
+st.subheader("🛡 Compliance Review")
+
+if st.button("🛡 Generate Compliance", use_container_width=True):
+    if st.session_state.marketing is None:
+        st.warning("Generate Marketing Strategy first.")
+    elif st.session_state.variants is None:
+        st.warning("Generate Variants first.")
+    else:
+        with st.spinner("Checking Compliance..."):
+            compliance = generate_compliance(
+                st.session_state.marketing,
+                st.session_state.variants,
+            )
+            st.session_state.compliance = compliance
+            st.success("Compliance completed.")
+
+if st.session_state.compliance:
+    st.subheader("🛡 Compliance Result")
+    st.json(st.session_state.compliance)
+
+# ============================================================
+# CONTENT CALENDAR
+# ============================================================
+st.divider()
+st.subheader("📅 Content Calendar")
+
+if st.button("📅 Generate Content Calendar", use_container_width=True):
+    if st.session_state.marketing is None:
+        st.warning("Generate Marketing Strategy first.")
+    else:
+        with st.spinner("Generating Content Calendar..."):
+            try:
+                content = generate_content(st.session_state.marketing)
+                st.session_state.content = content
+                st.success("Content Calendar generated.")
+            except Exception as exc:
+                st.exception(exc)
+
+if st.session_state.content:
+    st.subheader("📅 Generated Content")
+    st.json(st.session_state.content)
+
+# ============================================================
+# VIDEO GENERATION
+# ============================================================
+st.divider()
+st.subheader("🎬 AI Video")
+
+if st.button("🎥 Generate Video", use_container_width=True):
+    if st.session_state.content is None:
+        st.warning("Generate Content Calendar first.")
+    else:
+        with st.spinner("Generating Video..."):
+            try:
+                video = generate_video_assets(
+                    st.session_state.marketing,
+                    st.session_state.content,
+                )
+                st.session_state.video = video
+                st.success("Video generated.")
+            except Exception as exc:
+                st.exception(exc)
+
+if st.session_state.video:
+    st.subheader("🎬 Generated Video")
+    st.json(st.session_state.video)
+
+# ============================================================
 # EXECUTIVE REPORT
 # ============================================================
 st.divider()
@@ -245,10 +354,14 @@ if st.button("📝 Generate Executive Report", use_container_width=True):
         with st.spinner("Generating Executive Report..."):
             try:
                 report = generate_report(
-    product_intelligence=st.session_state.product,
-    market_intelligence=st.session_state.research,
-    marketing_strategy=st.session_state.marketing,
-)
+                    product_intelligence=st.session_state.product,
+                    market_intelligence=st.session_state.research,
+                    marketing_strategy=st.session_state.marketing,
+                    variants=st.session_state.variants,
+                    compliance=st.session_state.compliance,
+                    content=st.session_state.content,
+                    video=st.session_state.video,
+                )
                 if "error" in report:
                     st.error(report["error"])
                 else:
@@ -274,6 +387,10 @@ if st.session_state.report:
             "product.json": st.session_state.product,
             "research.json": st.session_state.research,
             "marketing.json": st.session_state.marketing,
+            "variants.json": st.session_state.variants,
+            "compliance.json": st.session_state.compliance,
+            "content.json": st.session_state.content,
+            "video.json": st.session_state.video,
             "report.json": st.session_state.report,
         }
         
@@ -290,9 +407,7 @@ if st.session_state.report:
     if st.button("📄 Export PDF", use_container_width=True):
         pdf_path = OUTPUT_DIR / "Executive_Report.pdf"
         try:
-            formatted_report = format_report(
-    st.session_state.report
-)
+            formatted_report = format_report(st.session_state.report)
             generate_pdf(formatted_report, str(pdf_path))
             st.success("PDF generated successfully.")
             
@@ -312,8 +427,7 @@ if st.session_state.report:
 st.divider()
 st.header("📊 Executive Dashboard")
 
-col1, col2, col3, col4 = st.columns(4)
-
+col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
 with col1:
     st.metric("Product", "✅" if st.session_state.product else "❌")
 with col2:
@@ -321,6 +435,14 @@ with col2:
 with col3:
     st.metric("Marketing", "✅" if st.session_state.marketing else "❌")
 with col4:
+    st.metric("Variants", "✅" if st.session_state.variants else "❌")
+with col5:
+    st.metric("Compliance", "✅" if st.session_state.compliance else "❌")
+with col6:
+    st.metric("Content", "✅" if st.session_state.content else "❌")
+with col7:
+    st.metric("Video", "✅" if st.session_state.video else "❌")
+with col8:
     st.metric("Report", "✅" if st.session_state.report else "❌")
 
 # ============================================================
@@ -330,12 +452,17 @@ completed = sum([
     bool(st.session_state.product),
     bool(st.session_state.research),
     bool(st.session_state.marketing),
-    bool(st.session_state.report)
+    bool(st.session_state.variants),
+    bool(st.session_state.compliance),
+    bool(st.session_state.content),
+    bool(st.session_state.video),
+    bool(st.session_state.report),
 ])
 
-progress = completed / 4
+progress = completed / 8
+
 st.progress(progress)
-st.caption(f"Pipeline Progress: {completed}/4")
+st.caption(f"Pipeline Progress: {completed}/8")
 
 # ============================================================
 # EXECUTIVE SUMMARY
@@ -370,6 +497,10 @@ with st.expander("🔎 View Complete Pipeline JSON"):
         "product": st.session_state.product,
         "research": st.session_state.research,
         "marketing": st.session_state.marketing,
+        "variants": st.session_state.variants,
+        "compliance": st.session_state.compliance,
+        "content": st.session_state.content,
+        "video": st.session_state.video,
         "report": st.session_state.report,
     })
 

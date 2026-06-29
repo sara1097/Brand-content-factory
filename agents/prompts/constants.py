@@ -98,6 +98,36 @@ AGENT_SETTINGS = {
     "num_ctx": 8192,
     "num_predict": 1200
 },
+"variant": {
+
+    "temperature": 0.50,
+
+    "top_p": 0.90,
+
+    "top_k": 40,
+
+    "repeat_penalty": 1.05,
+
+    "num_ctx": 8192,
+
+    "num_predict": 1800
+
+},
+"compliance": {
+
+    "temperature": 0.10,
+
+    "top_p": 0.90,
+
+    "top_k": 40,
+
+    "repeat_penalty": 1.05,
+
+    "num_ctx": 8192,
+
+    "num_predict": 2000
+
+},
 
     "report": {
 
@@ -182,6 +212,8 @@ PIPELINE = [
     "comparison",
 
     "marketing",
+
+    "variant",
 
     "report"
 

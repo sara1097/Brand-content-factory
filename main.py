@@ -4,7 +4,7 @@ Enterprise AI Business Intelligence System
 Entry Point
 """
 
-from core.pipeline import run_pipeline
+from pipeline import run_pipeline
 print("MAIN FILE STARTED")
 
 from reports.report_formatter import format_report
