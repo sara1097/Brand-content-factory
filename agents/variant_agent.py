@@ -20,14 +20,30 @@ from agents.prompts.variant_prompt import (
 # BUILD VARIANT INPUT
 # ============================================================
 
-def build_variant_input(marketing: dict) -> dict:
+def _summarize_content_calendar(content: dict | None) -> str:
+    """Condense the content calendar into a short reference the variant
+    agent can stay consistent with, without re-sending the full calendar."""
+    days = (content or {}).get("days", [])
+    if not days:
+        return "No content calendar available."
+
+    return "\n".join(
+        f'- Day {day.get("day")}: {day.get("post_idea", "")} (hook: "{day.get("hook", "")}")'
+        for day in days
+    )
+
+
+def build_variant_input(marketing: dict, content: dict | None = None) -> dict:
     """
-    Build a Creative Brief from the Marketing Strategy.
+    Build a Creative Brief from the Marketing Strategy and Content Calendar.
     The Variant Agent should transform this brief into ad copy,
     not invent a new marketing strategy.
     """
 
     return {
+
+        "content_calendar_summary": _summarize_content_calendar(content),
+
 
         # Campaign
         "campaign_goal":
@@ -180,6 +196,8 @@ def build_user_prompt(data: dict) -> str:
 
     return VARIANT_TASK_PROMPT.format(
 
+        content_calendar_summary=data["content_calendar_summary"],
+
         campaign_goal=data["campaign_goal"],
 
         target_audience=data["target_audience"],
@@ -254,9 +272,14 @@ def _ensure_shape(data: dict) -> dict:
 # GENERATE VARIANTS
 # ============================================================
 
-def generate_variants(marketing_strategy: dict) -> dict:
+def generate_variants(
+    marketing_strategy: dict,
+    content: dict | None = None,
+    model: str | None = None,
+    settings_overrides: dict | None = None,
+) -> dict:
     """
-    Generate A/B/C ad variants from Marketing Strategy.
+    Generate A/B/C ad variants from Marketing Strategy and Content Calendar.
     """
 
     if not marketing_strategy:
@@ -264,13 +287,18 @@ def generate_variants(marketing_strategy: dict) -> dict:
             "error": "Missing Marketing Strategy"
         }
 
-    variant_input = build_variant_input(marketing_strategy)
+    variant_input = build_variant_input(marketing_strategy, content)
 
     user_prompt = build_user_prompt(variant_input)
 
+    settings = AGENT_SETTINGS["variant"].copy()
+    if settings_overrides:
+        settings.update(settings_overrides)
+
     agent = BaseAgent(
         system_prompt=VARIANT_SYSTEM_PROMPT,
-        settings=AGENT_SETTINGS["variant"],
+        settings=settings,
+        model=model,
     )
 
     try:
@@ -299,6 +327,7 @@ def generate_variants(marketing_strategy: dict) -> dict:
 
     result["data_sources"] = {
     "used_marketing_strategy": True,
+    "used_content_calendar": bool(content),
     "generated_variants": 3,
     "campaign_goal": variant_input["campaign_goal"],
     "platform": variant_input["platform"],

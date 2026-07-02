@@ -1,7 +1,15 @@
 """
-app_enhanced.py
+app_qwen.py
 
-Enterprise AI Marketing Intelligence Platform
+Enterprise AI Marketing Intelligence Platform -- Qwen variant.
+
+Same pipeline as app_enhanced.py, but every text agent is pinned to a Qwen
+model (qwen/qwen3-32b) instead of the project default (Llama), with
+conservative token budgets tuned to fit under this Groq account's measured
+6000 TPM ceiling for that model. Vision uses the platform default (Llama)
+rather than Qwen's vision model, which has shown repeated server-side
+capacity outages on this account. Nothing here changes the default
+app_enhanced.py behavior; every override is passed explicitly per call.
 """
 
 from __future__ import annotations
@@ -12,11 +20,13 @@ from datetime import datetime
 
 import streamlit as st
 
+from config import PRODUCT_MODEL
+
 # ============================================================
 # PAGE CONFIG
 # ============================================================
 st.set_page_config(
-    page_title="Enterprise AI Marketing Intelligence",
+    page_title="Enterprise AI Marketing Intelligence (Qwen)",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -34,6 +44,52 @@ from reports.pdf_generator import generate_pdf
 from agents.compliance_agent import generate_compliance
 from agents.content_agent import generate_content
 from agents.video_agent import generate_video_assets
+
+# ============================================================
+# MODELS + TPM-SAFE TOKEN BUDGETS
+# ============================================================
+# Text agents use Qwen; this account's measured limit for qwen/qwen3-32b is
+# 6000 tokens/minute. A single request's cost is roughly
+# system_prompt + input_data + max_completion tokens, so every text budget
+# below leaves real headroom under that ceiling even with a full pipeline's
+# worth of input data.
+#
+# Vision uses the platform default (Llama) instead of Qwen: the Qwen vision
+# model (qwen/qwen3.6-27b) has shown repeated server-side capacity outages
+# on this account, independent of token budget or image size.
+
+VISION_MODEL = PRODUCT_MODEL
+QWEN_TEXT_MODEL = "qwen/qwen3-32b"
+
+VISION_MAX_TOKENS = 700          # vision JSON schema is ~14 short fields
+RESEARCH_SETTINGS = {"num_predict": 1500}
+RESEARCH_MAX_PRICE_SOURCES = 5
+RESEARCH_MAX_COMPETITOR_SOURCES = 3
+MARKETING_SETTINGS = {"num_predict": 900}
+CONTENT_MAX_TOKENS = 2000
+VARIANT_SETTINGS = {"num_predict": 1200}
+COMPLIANCE_SETTINGS = {"num_predict": 1200}
+REPORT_SETTINGS = {"num_predict": 1200}
+REPORT_SECTION_MAX_CHARS = 300   # bounds each report input section's size
+
+
+def _condense_for_report(data: dict | None, max_chars: int = REPORT_SECTION_MAX_CHARS) -> dict:
+    """
+    Bound every top-level field's size before it reaches the report
+    prompt, so the report step's total size stays predictable regardless
+    of how verbose upstream agents get -- the report system prompt alone
+    is already ~2100 tokens, leaving little room to spare under 6000 TPM.
+    """
+    if not data:
+        return {}
+    condensed = {}
+    for key, value in data.items():
+        if key in {"data_sources", "metadata", "evidence", "strategy_score"}:
+            continue
+        text = json.dumps(value, ensure_ascii=False)
+        condensed[key] = value if len(text) <= max_chars else text[:max_chars] + "...(truncated)"
+    return condensed
+
 
 # ============================================================
 # OUTPUT DIRECTORY
@@ -65,34 +121,41 @@ for key, value in DEFAULT_STATE.items():
 # HEADER
 # ============================================================
 st.title("📊 Enterprise AI Marketing Intelligence Platform")
-st.caption("Product Intelligence • Market Intelligence • Marketing Strategy • Executive Report")
+st.caption(f"Qwen text agents ({QWEN_TEXT_MODEL}) + Llama vision ({VISION_MODEL})")
+st.info(
+    "Text agents use Qwen with reduced token budgets to stay under this "
+    "account's tight rate limit. Vision uses Llama instead of Qwen, since "
+    "the Qwen vision model has shown repeated capacity outages on this "
+    "account. Text outputs may be more concise than the default (Llama) "
+    "app as a result of the reduced budgets."
+)
 
 # ============================================================
 # SIDEBAR
 # ============================================================
 with st.sidebar:
     st.header("⚙️ Business Constraints")
-    
+
     country = st.selectbox(
         "Country",
         ["Egypt", "Saudi Arabia", "UAE", "Qatar", "Kuwait"]
     )
-    
+
     budget = st.selectbox(
         "Budget",
         ["Low", "Medium", "High"]
     )
-    
+
     campaign_duration = st.selectbox(
         "Campaign Duration",
         ["1 Month", "3 Months", "6 Months", "12 Months"]
     )
-    
+
     primary_goal = st.selectbox(
         "Primary Goal",
         ["Increase Sales", "Brand Awareness", "Lead Generation", "Market Expansion"]
     )
-    
+
     brand_stage = st.selectbox(
         "Brand Stage",
         ["New Product Launch", "Growth", "Mature", "Rebranding"]
@@ -144,6 +207,8 @@ with col1:
                     product = analyze_product(
                         text_description=description,
                         image_path=image_path,
+                        model=VISION_MODEL,
+                        max_completion_tokens=VISION_MAX_TOKENS,
                     )
                     if "error" in product:
                         st.error(product["error"])
@@ -173,9 +238,9 @@ if st.session_state.product:
     st.divider()
     st.subheader("📦 Product Intelligence")
     product = st.session_state.product
-    
+
     tab1, tab2, tab3, tab4 = st.tabs(["Identity", "Visual", "Features", "JSON"])
-    
+
     with tab1:
         st.json({
             "product_name": product.get("product_name"),
@@ -216,7 +281,13 @@ if st.button("📈 Research Market", use_container_width=True):
     else:
         with st.spinner("Researching Market..."):
             try:
-                research = research_market(st.session_state.product)
+                research = research_market(
+                    st.session_state.product,
+                    model=QWEN_TEXT_MODEL,
+                    settings_overrides=RESEARCH_SETTINGS,
+                    max_price_sources=RESEARCH_MAX_PRICE_SOURCES,
+                    max_competitor_sources=RESEARCH_MAX_COMPETITOR_SOURCES,
+                )
                 if "error" in research:
                     st.error(research["error"])
                 else:
@@ -247,6 +318,8 @@ if st.button("🚀 Generate Marketing Strategy", use_container_width=True):
                     product_intelligence=st.session_state.product,
                     market_intelligence=st.session_state.research,
                     business_constraints=business_constraints,
+                    model=QWEN_TEXT_MODEL,
+                    settings_overrides=MARKETING_SETTINGS,
                 )
                 if "error" in marketing:
                     st.error(marketing["error"])
@@ -272,7 +345,11 @@ if st.button("📅 Generate Content Calendar", use_container_width=True):
     else:
         with st.spinner("Generating Content Calendar..."):
             try:
-                content = generate_content(st.session_state.marketing)
+                content = generate_content(
+                    st.session_state.marketing,
+                    model=QWEN_TEXT_MODEL,
+                    max_completion_tokens=CONTENT_MAX_TOKENS,
+                )
                 st.session_state.content = content
                 st.success("Content Calendar generated.")
             except Exception as exc:
@@ -294,7 +371,12 @@ if st.button("✨ Generate Ad Variants", use_container_width=True):
     else:
         with st.spinner("Generating Marketing Variants..."):
             try:
-                variants = generate_variants(st.session_state.marketing, st.session_state.content)
+                variants = generate_variants(
+                    st.session_state.marketing,
+                    st.session_state.content,
+                    model=QWEN_TEXT_MODEL,
+                    settings_overrides=VARIANT_SETTINGS,
+                )
                 if "error" in variants:
                     st.error(variants["error"])
                 else:
@@ -320,29 +402,33 @@ if st.button("🛡 Generate Compliance", use_container_width=True):
         st.warning("Generate Variants first.")
     else:
         with st.spinner("Checking Compliance..."):
-            compliance = generate_compliance(
-                st.session_state.marketing,
-                st.session_state.variants,
-            )
-            st.session_state.compliance = compliance
-            st.success("Compliance completed.")
+            try:
+                compliance = generate_compliance(
+                    st.session_state.marketing,
+                    st.session_state.variants,
+                    model=QWEN_TEXT_MODEL,
+                    settings_overrides=COMPLIANCE_SETTINGS,
+                )
+                st.session_state.compliance = compliance
+                st.success("Compliance completed.")
+            except Exception as exc:
+                st.exception(exc)
 
 if st.session_state.compliance:
     st.subheader("🛡 Compliance Result")
     st.json(st.session_state.compliance)
 
- 
 # ============================================================
 # VIDEO GENERATION
 # ============================================================
 st.divider()
 st.subheader("🎬 AI Video")
 st.caption(
-    "Two DISTINCT creative prompts (enhanced by Qwen, grounded in your "
-    "marketing strategy + content plan), each rendered as its own separate "
-    "video via the deployed WanGP API."
+    f"Two DISTINCT creative prompts (enhanced by Qwen: {QWEN_TEXT_MODEL}, "
+    "grounded in your marketing strategy + content plan), each rendered as "
+    "its own separate video via the deployed WanGP API."
 )
- 
+
 if st.button("🎥 Generate Video", use_container_width=True):
     if not description.strip():
         st.warning("Please enter a product description first.")
@@ -363,10 +449,10 @@ if st.button("🎥 Generate Video", use_container_width=True):
                     st.success("Videos generated.")
             except Exception as exc:
                 st.exception(exc)
- 
+
 if st.session_state.video:
     st.subheader("🎬 Generated Video")
- 
+
     if "variants" in st.session_state.video:
         variants = st.session_state.video["variants"]
         cols = st.columns(len(variants) or 1)
@@ -378,12 +464,13 @@ if st.session_state.video:
                     st.video(variant["video_path"])
                 else:
                     st.error(variant.get("error", "Generation failed"))
- 
+
         with st.expander("Raw video result JSON"):
             st.json(st.session_state.video)
     else:
         st.json(st.session_state.video)
- 
+
+
 
 # ============================================================
 # EXECUTIVE REPORT
@@ -398,12 +485,14 @@ if st.button("📝 Generate Executive Report", use_container_width=True):
         with st.spinner("Generating Executive Report..."):
             try:
                 report = generate_report(
-                    product_intelligence=st.session_state.product,
-                    market_intelligence=st.session_state.research,
-                    marketing_strategy=st.session_state.marketing,
-                    variants=st.session_state.variants,
-                    compliance=st.session_state.compliance,
-                    content=st.session_state.content,
+                    product_intelligence=_condense_for_report(st.session_state.product),
+                    market_intelligence=_condense_for_report(st.session_state.research),
+                    marketing_strategy=_condense_for_report(st.session_state.marketing),
+                    variants=_condense_for_report(st.session_state.variants),
+                    compliance=_condense_for_report(st.session_state.compliance),
+                    content=_condense_for_report(st.session_state.content),
+                    model=QWEN_TEXT_MODEL,
+                    settings_overrides=REPORT_SETTINGS,
                 )
                 if "error" in report:
                     st.error(report["error"])
@@ -437,7 +526,7 @@ if st.session_state.report:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_folder = OUTPUT_DIR / timestamp
         output_folder.mkdir(exist_ok=True)
-        
+
         files = {
             "product.json": st.session_state.product,
             "research.json": st.session_state.research,
@@ -448,11 +537,11 @@ if st.session_state.report:
             "video.json": st.session_state.video,
             "report.json": st.session_state.report,
         }
-        
+
         for filename, data in files.items():
             with open(output_folder / filename, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
-                
+
         st.success(f"Saved to {output_folder}")
 
 # ============================================================
@@ -464,7 +553,7 @@ if st.session_state.report:
         try:
             generate_pdf(st.session_state.report.get("narrative_report", ""), str(pdf_path))
             st.success("PDF generated successfully.")
-            
+
             with open(pdf_path, "rb") as pdf_file:
                 st.download_button(
                     label="⬇ Download PDF",
@@ -519,31 +608,6 @@ st.progress(progress)
 st.caption(f"Pipeline Progress: {completed}/8")
 
 # ============================================================
-# EXECUTIVE SUMMARY
-# ============================================================
-if st.session_state.report:
-    st.divider()
-    st.subheader("📝 Executive Summary")
-    summary = st.session_state.report.get("executive_summary", "No summary available.")
-    if isinstance(summary, dict):
-        st.json(summary)
-    else:
-        st.write(summary)
-
-# ============================================================
-# QUICK INSIGHTS
-# ============================================================
-if st.session_state.marketing:
-    st.divider()
-    st.subheader("💡 Quick Insights")
-    marketing = st.session_state.marketing
-    try:
-        exec_strategy = marketing.get("executive_strategy", {})
-        st.info(exec_strategy.get("assessment", "No assessment found."))
-    except Exception:
-        st.info("No executive insights.")
-
-# ============================================================
 # RAW JSON
 # ============================================================
 with st.expander("🔎 View Complete Pipeline JSON"):
@@ -571,6 +635,5 @@ if st.button("♻ Reset Session", use_container_width=True):
 # FOOTER
 # ============================================================
 st.divider()
-st.caption("Enterprise AI Marketing Intelligence Platform")
-st.caption("Version 2.0")
+st.caption("Enterprise AI Marketing Intelligence Platform -- Qwen variant")
 st.caption(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

@@ -189,6 +189,8 @@ def _ensure_shape(data: dict) -> dict:
 def generate_compliance(
     marketing_strategy: dict,
     variants: dict,
+    model: str | None = None,
+    settings_overrides: dict | None = None,
 ) -> dict:
 
     """
@@ -214,11 +216,17 @@ def generate_compliance(
     )
     user_prompt = build_user_prompt(compliance_input)
 
+    settings = AGENT_SETTINGS["compliance"].copy()
+    if settings_overrides:
+        settings.update(settings_overrides)
+
     agent = BaseAgent(
 
         system_prompt=COMPLIANCE_SYSTEM_PROMPT,
 
-        settings=AGENT_SETTINGS["compliance"]
+        settings=settings,
+
+        model=model,
 
     )
 
