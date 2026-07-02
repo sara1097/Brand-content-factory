@@ -65,6 +65,8 @@ def build_marketing_strategy(
     product_intelligence: dict,
     market_intelligence: dict,
     business_constraints: dict | None = None,
+    model: str | None = None,
+    settings_overrides: dict | None = None,
 ) -> dict:
     """
     Build an executive marketing strategy from:
@@ -89,9 +91,14 @@ def build_marketing_strategy(
     if business_constraints:
         constraints.update(business_constraints)
 
+    settings = AGENT_SETTINGS["marketing"].copy()
+    if settings_overrides:
+        settings.update(settings_overrides)
+
     agent = BaseAgent(
         system_prompt=MARKETING_SYSTEM_PROMPT,
-        settings=AGENT_SETTINGS["marketing"],
+        settings=settings,
+        model=model,
     )
     
     marketing_input = {

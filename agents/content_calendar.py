@@ -3,15 +3,13 @@ import random
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from groq import Groq
 
-from config import GROQ_API_KEY
+from config import DEFAULT_MODEL
+from tools.groq_client import create_chat_completion
 
 load_dotenv()
 
-groq_client = Groq(api_key=GROQ_API_KEY)
-
-GROQ_MODEL = "qwen/qwen3-32b"
+GROQ_MODEL = DEFAULT_MODEL
 
 CONTENT_FORMATS = [
     "static_post",
@@ -195,7 +193,11 @@ def generate_content_calendar(
     strategy: dict,
     campaign_name: str,
     max_attempts: int = 2,
+    model: str | None = None,
+    max_completion_tokens: int = 4096,
 ) -> dict:
+
+    resolved_model = model or GROQ_MODEL
 
     messages = [
 
@@ -220,15 +222,15 @@ def generate_content_calendar(
 
         try:
 
-            response = groq_client.chat.completions.create(
+            response = create_chat_completion(
 
-                model=GROQ_MODEL,
+                model=resolved_model,
 
                 messages=messages,
 
                 temperature=0.7,
 
-                max_tokens=4096,
+                max_completion_tokens=max_completion_tokens,
 
                 response_format={
                     "type": "json_object"
@@ -255,7 +257,7 @@ def generate_content_calendar(
             )
 
             calendar["model_used"] = (
-                f"groq/{GROQ_MODEL}"
+                f"groq/{resolved_model}"
             )
 
             return calendar

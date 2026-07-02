@@ -27,9 +27,17 @@ def save_json(filename: str, data: dict):
     print(f"✓ Saved {filename}")
 
 
+def _failed(step: str, result: dict) -> dict:
+    return {
+        "error": result.get("error", f"{step} failed"),
+        "failed_step": step,
+    }
+
+
 def run_pipeline(
     text_description: str,
     image_path: str | None = None,
+    business_constraints: dict | None = None,
 ):
     print("=" * 60)
     print("STEP 1 : PRODUCT")
@@ -37,6 +45,8 @@ def run_pipeline(
 
     product = analyze_product(text_description, image_path)
     save_json("product.json", product)
+    if "error" in product:
+        return _failed("product", product)
 
     print("=" * 60)
     print("STEP 2 : MARKET RESEARCH")
@@ -44,42 +54,53 @@ def run_pipeline(
 
     research = research_market(product)
     save_json("research.json", research)
+    if "error" in research:
+        return _failed("research", research)
 
     print("=" * 60)
     print("STEP 3 : MARKETING STRATEGY")
     print("=" * 60)
-    
-    marketing = build_marketing_strategy(product, research)
+
+    marketing = build_marketing_strategy(product, research, business_constraints)
     save_json("marketing.json", marketing)
+    if "error" in marketing:
+        return _failed("marketing", marketing)
 
     print("=" * 60)
-    print("STEP 4 : VARIANT GENERATION")
-    print("=" * 60)
-
-    variants = generate_variants(marketing)
-    save_json("variants.json", variants)
-
-    print("=" * 60)
-    print("STEP 5 : COMPLIANCE REVIEW")
-    print("=" * 60)
-
-    compliance = generate_compliance(marketing, variants)
-    save_json("compliance.json", compliance)
-
-    print("=" * 60)
-    print("STEP 6 : CONTENT CALENDAR")
+    print("STEP 4 : CONTENT CALENDAR")
     print("=" * 60)
 
     content = generate_content(marketing)
     save_json("content.json", content)
 
     print("=" * 60)
+    print("STEP 5 : VARIANT GENERATION")
+    print("=" * 60)
+
+    variants = generate_variants(marketing, content)
+    save_json("variants.json", variants)
+    if "error" in variants:
+        return _failed("variants", variants)
+
+    print("=" * 60)
+    print("STEP 6 : COMPLIANCE REVIEW")
+    print("=" * 60)
+
+    compliance = generate_compliance(marketing, variants)
+    save_json("compliance.json", compliance)
+    if "error" in compliance:
+        return _failed("compliance", compliance)
+
+    print("=" * 60)
     print("STEP 7 : VIDEO GENERATION")
     print("=" * 60)
 
     video = generate_video_assets(
-        marketing,
-        content,
+        description=text_description,
+        product=product,
+        marketing=marketing,
+        content=content,
+        image_path=image_path,
     )
     save_json("video.json", video)
 
@@ -90,20 +111,19 @@ def run_pipeline(
         variants,
         compliance,
         content,
-        video,
     )
     save_json("report.json", report)
 
     return {
-    "product": product,
-    "research": research,
-    "marketing": marketing,
-    "variants": variants,
-    "compliance": compliance,
-    "content": content,
-    "video": video,
-    "report": report,
-}
+        "product": product,
+        "research": research,
+        "marketing": marketing,
+        "variants": variants,
+        "compliance": compliance,
+        "content": content,
+        "video": video,
+        "report": report,
+    }
 
 
 if __name__ == "__main__":
@@ -116,4 +136,8 @@ if __name__ == "__main__":
 
     results = run_pipeline(description)
 
-    print("\nPipeline completed successfully.")
+    if "error" in results:
+        print(f"\nPipeline failed at step: {results.get('failed_step')}")
+        print(results["error"])
+    else:
+        print("\nPipeline completed successfully.")

@@ -2,13 +2,41 @@ import json
 import re
 
 
+def _repair_json(text: str) -> str:
+    """
+    Try to repair common JSON mistakes produced by LLMs.
+    """
+
+    # Remove markdown
+    text = text.replace("```json", "")
+    text = text.replace("```", "")
+
+    # Remove <think> blocks
+    text = re.sub(
+        r"<think>.*?</think>",
+        "",
+        text,
+        flags=re.DOTALL,
+    )
+
+    text = text.strip()
+
+    # Remove trailing commas
+    text = re.sub(r",\s*}", "}", text)
+    text = re.sub(r",\s*]", "]", text)
+
+    # Fix missing comma between objects
+    text = re.sub(r"}\s*{", "},{", text)
+
+    return text
+
+
 def parse_json_response(response: str):
 
-    # عرض الـ reasoning
     think_match = re.search(
         r"<think>(.*?)</think>",
         response,
-        flags=re.DOTALL
+        flags=re.DOTALL,
     )
 
     if think_match:
@@ -16,28 +44,28 @@ def parse_json_response(response: str):
         print(think_match.group(1).strip())
         print("\n=========================\n")
 
-    # حذف التفكير
-    cleaned_response = re.sub(
-        r"<think>.*?</think>",
-        "",
-        response,
-        flags=re.DOTALL
-    )
+    cleaned = _repair_json(response)
 
-    # حذف markdown
-    cleaned_response = cleaned_response.replace(
-        "```json", ""
-    )
-
-    cleaned_response = cleaned_response.replace(
-        "```", ""
-    )
-
-    cleaned_response = cleaned_response.strip()
-
-    # عرض الـ JSON الناتج
     print("\n===== Final JSON =====\n")
-    print(cleaned_response)
+    print(cleaned)
     print("\n======================\n")
 
-    return json.loads(cleaned_response)
+    try:
+        return json.loads(cleaned)
+
+    except json.JSONDecodeError as e:
+
+        print("\nJSON Repair Failed\n")
+        print(e)
+
+        # محاولة استخراج أول JSON فقط
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+
+        if start != -1 and end != -1:
+            try:
+                return json.loads(cleaned[start:end + 1])
+            except Exception:
+                pass
+
+        raise

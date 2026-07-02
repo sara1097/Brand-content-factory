@@ -17,7 +17,11 @@ def build_content_strategy(marketing: dict) -> dict:
         "success_kpis": marketing.get("kpi_framework", {}).get("attributes", {}).get("success_metrics", [])
     }
 
-def generate_content(marketing_strategy: dict) -> dict:
+def generate_content(
+    marketing_strategy: dict,
+    model: str | None = None,
+    max_completion_tokens: int = 4096,
+) -> dict:
     strategy = build_content_strategy(marketing_strategy)
 
     campaign_name = (
@@ -27,4 +31,12 @@ def generate_content(marketing_strategy: dict) -> dict:
         .get("campaign_name", "Marketing Campaign")
     )
 
-    return generate_content_calendar(strategy, campaign_name)
+    try:
+        return generate_content_calendar(
+            strategy,
+            campaign_name,
+            model=model,
+            max_completion_tokens=max_completion_tokens,
+        )
+    except Exception as exc:
+        return {"error": str(exc)}

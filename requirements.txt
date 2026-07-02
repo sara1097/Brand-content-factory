@@ -1,36 +1,24 @@
-# Core agent frameworks
-crewai>=0.11.0
-crewai-tools>=0.10.0
-langchain>=0.2.0
-langchain-community>=0.2.0
-langchain-openai>=0.1.0
+# LLM client (Groq cloud API -- qwen/llama models)
+groq>=0.11.0
 
-# LLM clients
-ollama>=0.3.0
-openai>=1.0.0
+# Web UI
+streamlit>=1.28.0
 
-# Memory / Vector DB
+# Memory / Vector DB (research history)
 chromadb>=0.4.0
-sentence-transformers>=2.2.0
 
-# Tools
-duckduckgo-search>=6.0.0
-tavily-python>=0.3.0
-beautifulsoup4>=4.10.0
-requests>=2.28.0
+# Web research evidence
+ddgs>=6.0.0
+
+# Executive PDF report
+reportlab>=4.0.0
 
 # Utilities
 python-dotenv>=1.0.0
 pydantic>=2.0.0
 pillow>=9.0.0
 
-# For vision
-opencv-python>=4.8.0
 
-# API (optional - for deployment later)
-fastapi>=0.100.0
-uvicorn>=0.20.0
 
-# Notebook
-ipykernel>=6.0.0
-jupyter>=1.0.0
+# HTTP client (deployed WanGP video generation API on Modal)
+requests>=2.31.0

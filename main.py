@@ -7,8 +7,6 @@ Entry Point
 from pipeline import run_pipeline
 print("MAIN FILE STARTED")
 
-from reports.report_formatter import format_report
-
 from reports.pdf_generator import generate_pdf
 
 
@@ -65,17 +63,11 @@ def main():
 
     print("Formatting Report...")
 
-    formatted_report = format_report(
-
-        results["report"]
-
-    )
-
     output_file = "Executive_Report.pdf"
 
     generate_pdf(
 
-        formatted_report,
+        results["report"].get("narrative_report", ""),
 
         output_file
 

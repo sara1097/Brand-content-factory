@@ -1,0 +1,217 @@
+"""
+Client for the deployed WanGP FastAPI wrapper (running on Modal).
+
+Talks to the existing, unmodified wangp_api service purely over HTTP:
+
+    POST /generate       submit a text-to-video / image-to-video job
+    GET  /job/{id}       poll status/progress
+    GET  /job/{id}/file  download a finished output file
+
+Nothing in wangp_api or Wan2GP is touched by this module -- it only calls
+the deployed API's public HTTP endpoints (see wangp_api/README.md).
+
+Any generation setting beyond prompt/seed/image_refs (resolution, steps,
+video_prompt_type, etc.) is intentionally left unset here and comes from
+the settings template already configured inside the wangp_api project
+(wangp_api/settings_templates/*.json) -- adjust it there, not here.
+"""
+from __future__ import annotations
+
+import base64
+import mimetypes
+import os
+import random
+import time
+from pathlib import Path
+
+import requests
+
+from config import (
+    WANGP_API_URL,
+    WANGP_DOWNLOAD_TIMEOUT_SECONDS,
+    WANGP_MAX_WAIT_SECONDS,
+    WANGP_POLL_HTTP_TIMEOUT_SECONDS,
+    WANGP_POLL_INTERVAL_SECONDS,
+    WANGP_SUBMIT_TIMEOUT_SECONDS,
+)
+
+TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
+
+
+class WanGPClientError(Exception):
+    """Raised on any failure talking to the deployed WanGP API."""
+
+
+def _image_to_data_uri(image_path: str) -> str:
+    """Reads a local image and encodes it as a base64 data: URI, which
+    wangp_api's media resolver (app/media.py) accepts directly for
+    image_refs / image_start -- the Modal container can't see the local
+    filesystem, so the photo has to travel inside the request body."""
+    path = Path(image_path)
+    if not path.is_file():
+        raise WanGPClientError(f"Image not found: {image_path}")
+
+    mime, _ = mimetypes.guess_type(path.name)
+    mime = mime or "image/jpeg"
+
+    with path.open("rb") as f:
+        b64 = base64.b64encode(f.read()).decode("utf-8")
+
+    return f"data:{mime};base64,{b64}"
+
+
+def _submit_job(prompt: str, image_path: str | None, seed: int) -> str:
+    payload: dict = {
+        "prompt": prompt,
+        "seed": seed,
+    }
+
+    if image_path:
+        # Reference image: keeps the product's exact packaging/branding
+        # while animating around it (matches the LTX-2 MSR default
+        # template already configured in wangp_api).
+        payload["image_refs"] = [_image_to_data_uri(image_path)]
+
+    # No other settings are set here on purpose -- the deployed template
+    # in wangp_api/settings_templates/*.json supplies everything else
+    # (including the no-photo / text-only behaviour).
+
+    try:
+        # Generous timeout: if the Modal container is cold (scaled to
+        # zero), this single request has to wait for the platform to spin
+        # it up and finish WanGP session init before it even gets a
+        # response -- that can take minutes, not seconds.
+        response = requests.post(
+            f"{WANGP_API_URL}/generate", json=payload, timeout=WANGP_SUBMIT_TIMEOUT_SECONDS
+        )
+    except requests.exceptions.Timeout as exc:
+        raise WanGPClientError(
+            f"WanGP /generate timed out after {WANGP_SUBMIT_TIMEOUT_SECONDS:.0f}s. "
+            "This usually means the Modal container was cold-starting (loading the "
+            "model into GPU memory) and needs longer, or it's stuck -- check "
+            f"{WANGP_API_URL}/health and the Modal app logs. You can also raise "
+            "WANGP_SUBMIT_TIMEOUT_SECONDS in .env, or set min_containers=1 in "
+            "modal_app.py to avoid cold starts entirely."
+        ) from exc
+    except requests.exceptions.ConnectionError as exc:
+        raise WanGPClientError(
+            f"Could not reach WanGP API at {WANGP_API_URL}: {exc}"
+        ) from exc
+
+    if response.status_code not in (200, 202):
+        raise WanGPClientError(
+            f"WanGP /generate failed ({response.status_code}): {response.text}"
+        )
+
+    data = response.json()
+    job_id = data.get("id")
+    if not job_id:
+        raise WanGPClientError(f"WanGP /generate response missing job id: {data}")
+
+    return job_id
+
+
+def _wait_for_job(job_id: str) -> dict:
+    deadline = time.time() + WANGP_MAX_WAIT_SECONDS
+
+    while time.time() < deadline:
+        try:
+            response = requests.get(
+                f"{WANGP_API_URL}/job/{job_id}", timeout=WANGP_POLL_HTTP_TIMEOUT_SECONDS
+            )
+        except requests.exceptions.RequestException as exc:
+            raise WanGPClientError(f"WanGP /job/{job_id} request failed: {exc}") from exc
+
+        if response.status_code != 200:
+            raise WanGPClientError(
+                f"WanGP /job/{job_id} failed ({response.status_code}): {response.text}"
+            )
+
+        job = response.json()
+        if job.get("status") in TERMINAL_STATUSES:
+            return job
+
+        time.sleep(WANGP_POLL_INTERVAL_SECONDS)
+
+    raise WanGPClientError(f"WanGP job {job_id} timed out after {WANGP_MAX_WAIT_SECONDS}s")
+
+
+def _download_output(job_id: str, output_dir: str, index: int = 0) -> str:
+    try:
+        response = requests.get(
+            f"{WANGP_API_URL}/job/{job_id}/file",
+            params={"index": index},
+            timeout=WANGP_DOWNLOAD_TIMEOUT_SECONDS,
+        )
+    except requests.exceptions.RequestException as exc:
+        raise WanGPClientError(f"WanGP /job/{job_id}/file request failed: {exc}") from exc
+
+    if response.status_code != 200:
+        raise WanGPClientError(
+            f"WanGP /job/{job_id}/file failed ({response.status_code}): {response.text}"
+        )
+
+    os.makedirs(output_dir, exist_ok=True)
+    dest = Path(output_dir) / f"{job_id}.mp4"
+    dest.write_bytes(response.content)
+    return str(dest)
+
+
+def generate_video_variants(
+    prompts: list[str],
+    image_path: str | None = None,
+    output_dir: str = "outputs",
+) -> list[dict]:
+    """
+    Submits ONE WanGP job per prompt in `prompts` -- e.g. two different
+    prompts produce two different videos, each one continuous single
+    shot. This is NOT the same prompt reused with different seeds; each
+    job renders its own distinct prompt (with its own random seed). Waits
+    for all jobs, downloads the finished MP4s locally, and returns
+    per-variant metadata.
+
+    Returns a list of dicts like:
+        {"variant": 1, "prompt": "...", "seed": 123, "job_id": "...",
+         "status": "succeeded", "video_path": "outputs/<job_id>.mp4"}
+    or, on failure for that variant:
+        {"variant": 2, "prompt": "...", "seed": 124, "job_id": "...",
+         "status": "failed", "error": "..."}
+    """
+    submitted = []
+    for i, prompt in enumerate(prompts):
+        seed = random.randint(0, 2_000_000_000)
+        job_id = _submit_job(prompt=prompt, image_path=image_path, seed=seed)
+        submitted.append({"variant": i + 1, "prompt": prompt, "seed": seed, "job_id": job_id})
+
+    variants = []
+    for item in submitted:
+        try:
+            job = _wait_for_job(item["job_id"])
+        except WanGPClientError as exc:
+            variants.append({**item, "status": "error", "error": str(exc)})
+            continue
+
+        status = job.get("status")
+        if status != "succeeded" or not job.get("generated_files"):
+            error_detail = job.get("error_message") or "; ".join(
+                e.get("message", "") for e in job.get("errors", [])
+            )
+            variants.append({**item, "status": status, "error": error_detail or "Unknown error"})
+            continue
+
+        try:
+            local_path = _download_output(item["job_id"], output_dir)
+        except WanGPClientError as exc:
+            variants.append({**item, "status": "error", "error": str(exc)})
+            continue
+
+        variants.append(
+            {
+                **item,
+                "status": "succeeded",
+                "video_path": local_path,
+                "generated_files": job.get("generated_files"),
+            }
+        )
+
+    return variants

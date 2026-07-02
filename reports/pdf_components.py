@@ -4,8 +4,13 @@ pdf_components.py
 Reusable PDF components for ReportLab.
 """
 
+import re
+
 from reportlab.platypus import Paragraph, Spacer
 from reportlab.lib.units import inch
+
+_DASH_LINE = re.compile(r"^-{3,}$")
+_EQUALS_LINE = re.compile(r"^={3,}$")
 
 
 # ============================================================
@@ -115,52 +120,58 @@ def add_bullets(story, items, styles):
 
 
 # ============================================================
-# SECTION
+# NARRATIVE TEXT
 # ============================================================
 
-def add_section(story, title, content, styles):
-    print("NEW PDF COMPONENTS")
-    add_heading(
-        story,
-        title,
-        styles,
-    )
+def add_narrative_text(story, text, styles):
+    """
+    Render the report's plain-text narrative (see
+    agents/report_agent.py::_build_narrative_report) into the PDF as real
+    headings, bullet lists, and paragraphs -- instead of dumping the raw
+    report structure as one block of text.
+    """
+    lines = text.splitlines()
 
-    def render(value):
+    # The narrative always opens with "EXECUTIVE BUSINESS REPORT" + a "="
+    # separator -- already covered by add_title/add_subtitle, so skip it.
+    if lines and lines[0].strip().upper() == "EXECUTIVE BUSINESS REPORT":
+        lines = lines[1:]
+        if lines and _EQUALS_LINE.match(lines[0].strip()):
+            lines = lines[1:]
 
-        if isinstance(value, dict):
+    bullets: list[str] = []
 
-            for k, v in value.items():
+    def flush_bullets():
+        if bullets:
+            add_bullets(story, list(bullets), styles)
+            bullets.clear()
 
-                add_heading(
-                    story,
-                    k.replace("_", " ").title(),
-                    styles,
-                )
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
 
-                render(v)
+        if not line:
+            i += 1
+            continue
 
-        elif isinstance(value, list):
+        if _EQUALS_LINE.match(line):
+            i += 1
+            continue
 
-            if all(not isinstance(i, (dict, list)) for i in value):
+        next_line = lines[i + 1].strip() if i + 1 < len(lines) else ""
+        if _DASH_LINE.match(next_line):
+            flush_bullets()
+            add_heading(story, line.title(), styles)
+            i += 2
+            continue
 
-                add_bullets(
-                    story,
-                    value,
-                    styles,
-                )
+        if line.startswith("- "):
+            bullets.append(line[2:])
+            i += 1
+            continue
 
-            else:
+        flush_bullets()
+        add_paragraph(story, line, styles)
+        i += 1
 
-                for item in value:
-                    render(item)
-
-        else:
-
-            add_paragraph(
-                story,
-                value,
-                styles,
-            )
-
-    render(content)
+    flush_bullets()

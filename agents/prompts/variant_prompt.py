@@ -49,6 +49,9 @@ Promotional Tactics:
 Recommended CTAs:
 {call_to_actions}
 
+Content Calendar (already planned posts -- keep variants complementary, do not duplicate a hook already used there):
+{content_calendar_summary}
+
 ==================================================
 TASK
 ==================================================
@@ -76,6 +79,7 @@ IMPORTANT:
 - Use the recommended CTA as inspiration.
 - Every hook must be different.
 - Every CTA must be different.
+- Stay consistent with the content calendar's tone and campaign angle.
 
 Return ONLY valid JSON.
 

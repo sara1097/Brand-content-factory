@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "app_enhanced",
+      "runtimeExecutable": "C:\\Users\\youss\\miniconda3\\envs\\agent\\Scripts\\streamlit.exe",
+      "runtimeArgs": ["run", "app_enhanced.py", "--server.headless=true"],
+      "port": 8501
+    }
+  ]
+}

@@ -1,13 +1,10 @@
-"""
-Base Agent
-
-Reusable base class for all AI agents.
-"""
+from config import DEFAULT_MODEL
 
 from tools.groq_client import (
     call_groq,
     parse_json_response,
 )
+
 
 class BaseAgent:
 
@@ -15,9 +12,11 @@ class BaseAgent:
         self,
         system_prompt: str,
         settings: dict,
+        model: str | None = None,
     ):
         self.system_prompt = system_prompt
         self.settings = settings
+        self.model = model or DEFAULT_MODEL
 
     def generate(
         self,
@@ -35,9 +34,12 @@ class BaseAgent:
             },
         ]
 
+        settings = self.settings.copy()
+        settings["model"] = self.model
+
         raw_output = call_groq(
             messages=messages,
-            **self.settings,
+            **settings,
         )
 
         return parse_json_response(

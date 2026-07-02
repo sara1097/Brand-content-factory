@@ -1,130 +1,89 @@
-from agents.storyboard_agent import generate_storyboard
-from agents.prompt_agent import generate_scene_prompts
-from models.wan_generator import generate_video
-from utils.moviepy_builder import compose_video
-from schemas.marketing_schema import MarketingInput
-def build_marketing_input(
-    marketing: dict,
-    content: dict,
-) -> MarketingInput:
+"""
+Video generation agent.
 
-    return MarketingInput(
+Flow:
+  1. Take the user's raw product description + optional analyzed product
+     intelligence + optional marketing strategy + optional content plan +
+     optional uploaded photo.
+  2. Ask Qwen for TWO DISTINCT cinematic video prompts -- two different
+     creative directions for the same product, grounded in the marketing
+     strategy / content plan when available
+     (agents.prompt_agent.generate_video_prompts).
+  3. Render each prompt as its own separate video (two different prompts
+     -> two different videos) through the deployed WanGP API
+     (models.wangp_client).
 
-        campaign_context={
+No storyboard, no per-scene prompts, no video stitching, and the two
+videos are not the same prompt reused with different seeds -- they come
+from two distinct prompts.
+"""
+from agents.prompt_agent import generate_video_prompts
+from config import QWEN_MODEL, WANGP_NUM_VARIANTS
+from models.wangp_client import WanGPClientError, generate_video_variants
 
-            "campaign_goal":
-                marketing.get(
-                    "data_sources",
-                    {}
-                ).get(
-                    "primary_goal",
-                    ""
-                ),
 
-            "campaign_name":
-                marketing.get(
-                    "campaign_strategy",
-                    {}
-                ).get(
-                    "attributes",
-                    {}
-                ).get(
-                    "campaign_name",
-                    "Marketing Campaign"
-                ),
+def generate_video_assets(
+    description: str,
+    product: dict | None = None,
+    marketing: dict | None = None,
+    content: dict | None = None,
+    image_path: str | None = None,
+) -> dict:
+    """
+    Args:
+        description: the raw product description the user typed in.
+        product: optional product-intelligence dict from agents.product_agent
+            (used to keep exact branding/text/logo consistent in the prompts).
+        marketing: optional marketing-strategy dict (target audience,
+            campaign goal, tone, etc.) -- folded into the prompt context.
+        content: optional content-calendar dict -- folded into the prompt
+            context.
+        image_path: optional local path to the uploaded product photo. When
+            given, it's sent to WanGP as an image reference on every video
+            so the product's packaging/branding is preserved.
 
-        },
+    Returns a dict with the two distinct prompts and their generated video
+    variants, e.g.:
 
-        target_persona={
-
-            "target_audience":
-                marketing.get(
-                    "stp_analysis",
-                    {}
-                ).get(
-                    "attributes",
-                    {}
-                ).get(
-                    "target_audience",
-                    []
-                ),
-
-            "pain_points":
-                marketing.get(
-                    "stp_analysis",
-                    {}
-                ).get(
-                    "attributes",
-                    {}
-                ).get(
-                    "pain_points",
-                    []
-                ),
-
-            "motivations":
-                marketing.get(
-                    "stp_analysis",
-                    {}
-                ).get(
-                    "attributes",
-                    {}
-                ).get(
-                    "customer_motivations",
-                    []
-                ),
-
-        },
-
-        platform_context={
-
-            "social_platforms":
-                marketing.get(
-                    "channel_strategy",
-                    {}
-                ).get(
-                    "attributes",
-                    {}
-                ).get(
-                    "social_platforms",
-                    []
-                ),
-
-        },
-
-        content_input=content,
-
-        creative_constraints={
-
-            "video_style": "cinematic",
-
-            "video_duration": 20,
-
-            "language": "English"
-
+        {
+            "prompts": ["...", "..."],
+            "image_used": True,
+            "num_variants": 2,
+            "variants": [
+                {"variant": 1, "prompt": "...", "seed": 123, "job_id": "...",
+                 "status": "succeeded", "video_path": "outputs/<id>.mp4"},
+                {"variant": 2, "prompt": "...", "seed": 456, "job_id": "...",
+                 "status": "succeeded", "video_path": "outputs/<id>.mp4"},
+            ],
+            "is_placeholder": False,
         }
+    """
+    if not description or not description.strip():
+        return {"error": "A product description is required to generate a video."}
 
-    )
-
-def generate_video_assets(marketing: dict, content: dict):
-    marketing_input = build_marketing_input(marketing, content)
-    
-    storyboard = generate_storyboard(marketing_input)
-    scene_prompts = generate_scene_prompts(storyboard)
-
-    video_paths = []
-    
-    for scene in scene_prompts.prompts:
-        path = generate_video(
-            scene.prompt,
-            f"outputs/video_{scene.scene_number}.mp4"
+    try:
+        prompts = generate_video_prompts(
+            description=description,
+            product=product,
+            marketing=marketing,
+            content=content,
+            model=QWEN_MODEL,
+            num_prompts=WANGP_NUM_VARIANTS,
         )
-        video_paths.append(path)
 
-    final_video = compose_video(video_paths)
+        variants = generate_video_variants(
+            prompts=prompts,
+            image_path=image_path,
+        )
+    except WanGPClientError as exc:
+        return {"error": f"WanGP API error: {exc}"}
+    except Exception as exc:
+        return {"error": str(exc)}
 
     return {
-        "storyboard": storyboard.model_dump(),
-        "scene_prompts": scene_prompts.model_dump(),
-        "video_paths": video_paths,
-        "final_video": final_video,
+        "prompts": prompts,
+        "image_used": bool(image_path),
+        "num_variants": len(variants),
+        "variants": variants,
+        "is_placeholder": False,
     }
