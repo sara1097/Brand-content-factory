@@ -28,6 +28,7 @@ def generate_video_assets(
     marketing: dict | None = None,
     content: dict | None = None,
     image_path: str | None = None,
+    on_progress=None,
 ) -> dict:
     """
     Args:
@@ -41,6 +42,10 @@ def generate_video_assets(
         image_path: optional local path to the uploaded product photo. When
             given, it's sent to WanGP as an image reference on every video
             so the product's packaging/branding is preserved.
+        on_progress: optional callback(variant, total_variants, pct, status,
+            phase) invoked as each video's render progresses -- e.g. wire
+            this up to a Streamlit progress bar. Never raises even if the
+            callback itself errors.
 
     Returns a dict with the two distinct prompts and their generated video
     variants, e.g.:
@@ -71,9 +76,14 @@ def generate_video_assets(
             num_prompts=WANGP_NUM_VARIANTS,
         )
 
+        print(f"\n[VideoAgent] Qwen generated {len(prompts)} distinct video prompt(s):")
+        for i, prompt in enumerate(prompts, start=1):
+            print(f"[VideoAgent]   Prompt {i}: {prompt}")
+
         variants = generate_video_variants(
             prompts=prompts,
             image_path=image_path,
+            on_progress=on_progress,
         )
     except WanGPClientError as exc:
         return {"error": f"WanGP API error: {exc}"}

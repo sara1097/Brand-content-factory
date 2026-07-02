@@ -29,6 +29,7 @@ import requests
 from config import (
     WANGP_API_URL,
     WANGP_DOWNLOAD_TIMEOUT_SECONDS,
+    WANGP_LOG_EVERY_N_POLLS,
     WANGP_MAX_WAIT_SECONDS,
     WANGP_POLL_HTTP_TIMEOUT_SECONDS,
     WANGP_POLL_INTERVAL_SECONDS,
@@ -36,6 +37,28 @@ from config import (
 )
 
 TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
+
+# A short, capped log file mirroring the request/progress lines printed to
+# the terminal below -- so there's always a small, shareable/downloadable
+# file of "what requests were made" instead of nothing, and instead of an
+# ever-growing file. Oldest lines are dropped once _MAX_LOG_LINES is hit.
+_LOG_FILE = Path("outputs") / "wangp_requests.log"
+_MAX_LOG_LINES = 200
+
+
+def _log(message: str) -> None:
+    """Print a line to the terminal and append it to outputs/wangp_requests.log
+    (capped at _MAX_LOG_LINES so the log file stays small)."""
+    print(message)
+    try:
+        _LOG_FILE.parent.mkdir(exist_ok=True)
+        with _LOG_FILE.open("a", encoding="utf-8") as f:
+            f.write(message + "\n")
+        lines = _LOG_FILE.read_text(encoding="utf-8").splitlines()
+        if len(lines) > _MAX_LOG_LINES:
+            _LOG_FILE.write_text("\n".join(lines[-_MAX_LOG_LINES:]) + "\n", encoding="utf-8")
+    except OSError:
+        pass  # logging must never break generation
 
 
 class WanGPClientError(Exception):
@@ -76,6 +99,9 @@ def _submit_job(prompt: str, image_path: str | None, seed: int) -> str:
     # in wangp_api/settings_templates/*.json supplies everything else
     # (including the no-photo / text-only behaviour).
 
+    prompt_preview = prompt if len(prompt) <= 80 else prompt[:77] + "..."
+    _log(f"[WanGP] -> POST /generate  seed={seed}  image_ref={'yes' if image_path else 'no'}  prompt=\"{prompt_preview}\"")
+
     try:
         # Generous timeout: if the Modal container is cold (scaled to
         # zero), this single request has to wait for the platform to spin
@@ -108,13 +134,39 @@ def _submit_job(prompt: str, image_path: str | None, seed: int) -> str:
     if not job_id:
         raise WanGPClientError(f"WanGP /generate response missing job id: {data}")
 
+    _log(f"[WanGP] <- job accepted  job_id={job_id}")
     return job_id
 
 
-def _wait_for_job(job_id: str) -> dict:
+def _wait_for_job(
+    job_id: str,
+    label: str = "",
+    on_progress=None,
+    variant: int = 1,
+    total_variants: int = 1,
+) -> dict:
+    """
+    on_progress, if given, is called as on_progress(variant, total_variants,
+    pct, status, phase) every time we get a fresh reading -- pct is 0-100
+    or None if the API hasn't reported one yet. Used by callers (e.g. a
+    Streamlit app) to drive a live progress bar; must not raise.
+    """
     deadline = time.time() + WANGP_MAX_WAIT_SECONDS
+    poll_count = 0
+    last_logged_pct = None
+
+    def _notify(pct, status, phase):
+        if on_progress is None:
+            return
+        try:
+            on_progress(variant, total_variants, pct, status, phase)
+        except Exception:
+            pass  # a broken UI callback must never break generation
+
+    _notify(0, "queued", None)
 
     while time.time() < deadline:
+        poll_count += 1
         try:
             response = requests.get(
                 f"{WANGP_API_URL}/job/{job_id}", timeout=WANGP_POLL_HTTP_TIMEOUT_SECONDS
@@ -128,7 +180,29 @@ def _wait_for_job(job_id: str) -> dict:
             )
 
         job = response.json()
-        if job.get("status") in TERMINAL_STATUSES:
+        status = job.get("status")
+        progress = job.get("progress") or {}
+        pct = progress.get("progress")
+        phase = progress.get("phase")
+
+        _notify(pct, status, phase)
+
+        # We still POLL every WANGP_POLL_INTERVAL_SECONDS (needed to catch
+        # completion promptly), but only PRINT/LOG a line on the first
+        # poll, every Nth poll, or when the percentage actually moved --
+        # this is what turns "silent + hundreds of requests" into
+        # "visible progress + a handful of log lines".
+        if poll_count == 1 or poll_count % WANGP_LOG_EVERY_N_POLLS == 0 or pct != last_logged_pct:
+            _log(
+                f"[WanGP]{label} <- GET /job/{job_id[:8]}  poll #{poll_count}  "
+                f"status={status}  progress={pct if pct is not None else '?'}%  "
+                f"phase={phase or '-'}"
+            )
+            last_logged_pct = pct
+
+        if status in TERMINAL_STATUSES:
+            _log(f"[WanGP]{label} job {job_id[:8]} finished: status={status} (after {poll_count} polls)")
+            _notify(100 if status == "succeeded" else pct, status, phase)
             return job
 
         time.sleep(WANGP_POLL_INTERVAL_SECONDS)
@@ -161,6 +235,7 @@ def generate_video_variants(
     prompts: list[str],
     image_path: str | None = None,
     output_dir: str = "outputs",
+    on_progress=None,
 ) -> list[dict]:
     """
     Submits ONE WanGP job per prompt in `prompts` -- e.g. two different
@@ -170,6 +245,10 @@ def generate_video_variants(
     for all jobs, downloads the finished MP4s locally, and returns
     per-variant metadata.
 
+    on_progress, if given, is called as on_progress(variant, total_variants,
+    pct, status, phase) each time fresh progress is available for any
+    variant -- pass this to drive a UI progress bar (e.g. in Streamlit).
+
     Returns a list of dicts like:
         {"variant": 1, "prompt": "...", "seed": 123, "job_id": "...",
          "status": "succeeded", "video_path": "outputs/<job_id>.mp4"}
@@ -177,16 +256,29 @@ def generate_video_variants(
         {"variant": 2, "prompt": "...", "seed": 124, "job_id": "...",
          "status": "failed", "error": "..."}
     """
+    _log(f"\n[WanGP] === {len(prompts)} video prompt(s) to render ===")
+    for i, prompt in enumerate(prompts, start=1):
+        _log(f"[WanGP] Prompt {i}: {prompt}")
+    _log("[WanGP] " + "=" * 40)
+
     submitted = []
     for i, prompt in enumerate(prompts):
         seed = random.randint(0, 2_000_000_000)
+        _log(f"[WanGP] Submitting variant {i + 1}/{len(prompts)} (seed={seed})...")
         job_id = _submit_job(prompt=prompt, image_path=image_path, seed=seed)
         submitted.append({"variant": i + 1, "prompt": prompt, "seed": seed, "job_id": job_id})
 
     variants = []
     for item in submitted:
+        label = f" [variant {item['variant']}]"
         try:
-            job = _wait_for_job(item["job_id"])
+            job = _wait_for_job(
+                item["job_id"],
+                label=label,
+                on_progress=on_progress,
+                variant=item["variant"],
+                total_variants=len(prompts),
+            )
         except WanGPClientError as exc:
             variants.append({**item, "status": "error", "error": str(exc)})
             continue

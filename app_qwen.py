@@ -433,22 +433,48 @@ if st.button("🎥 Generate Video", use_container_width=True):
     if not description.strip():
         st.warning("Please enter a product description first.")
     else:
-        with st.spinner("Enhancing prompts with Qwen and rendering 2 videos..."):
-            try:
-                video = generate_video_assets(
-                    description=description,
-                    product=st.session_state.product,
-                    marketing=st.session_state.marketing,
-                    content=st.session_state.content,
-                    image_path=image_path,
-                )
-                if "error" in video:
-                    st.error(video["error"])
-                else:
-                    st.session_state.video = video
-                    st.success("Videos generated.")
-            except Exception as exc:
-                st.exception(exc)
+        total_variants = 2  # WANGP_NUM_VARIANTS
+        progress_bar = st.progress(0, text="Enhancing prompts with Qwen...")
+        variant_status = st.empty()
+
+        def _on_video_progress(variant, total, pct, status, phase):
+            # Overall progress = variants fully done + current variant's
+            # fractional progress, spread evenly across all variants.
+            total = total or total_variants
+            done_variants = variant - 1
+            fraction = (pct or 0) / 100
+            overall = (done_variants + fraction) / total
+            overall = min(max(overall, 0.0), 1.0)
+            label = f"Variant {variant}/{total}: {status}"
+            if pct is not None:
+                label += f" ({pct}%)"
+            if phase:
+                label += f" — {phase}"
+            progress_bar.progress(overall, text=label)
+            variant_status.caption(label)
+
+        try:
+            video = generate_video_assets(
+                description=description,
+                product=st.session_state.product,
+                marketing=st.session_state.marketing,
+                content=st.session_state.content,
+                image_path=image_path,
+                on_progress=_on_video_progress,
+            )
+            if "error" in video:
+                progress_bar.empty()
+                variant_status.empty()
+                st.error(video["error"])
+            else:
+                st.session_state.video = video
+                progress_bar.progress(1.0, text="Done — 2 videos rendered")
+                variant_status.empty()
+                st.success("Videos generated.")
+        except Exception as exc:
+            progress_bar.empty()
+            variant_status.empty()
+            st.exception(exc)
 
 if st.session_state.video:
     st.subheader("🎬 Generated Video")

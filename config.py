@@ -86,8 +86,19 @@ WANGP_POLL_HTTP_TIMEOUT_SECONDS = float(os.getenv("WANGP_POLL_HTTP_TIMEOUT_SECON
 WANGP_DOWNLOAD_TIMEOUT_SECONDS = float(os.getenv("WANGP_DOWNLOAD_TIMEOUT_SECONDS", "180"))
  
 # Polling cadence / ceiling while waiting for a WanGP job to finish.
-WANGP_POLL_INTERVAL_SECONDS = float(os.getenv("WANGP_POLL_INTERVAL_SECONDS", "3"))
+# NOTE: this was 3s, which on a ~5min render means ~100 GET /job/{id}
+# requests PER VIDEO (200+ for the two variants combined) -- that's the
+# "too many requests" cost problem. 10s cuts that by ~3x while still
+# feeling responsive.
+WANGP_POLL_INTERVAL_SECONDS = float(os.getenv("WANGP_POLL_INTERVAL_SECONDS", "10"))
 WANGP_MAX_WAIT_SECONDS = float(os.getenv("WANGP_MAX_WAIT_SECONDS", "900"))
+
+# How many poll cycles between terminal/log progress lines. We still poll
+# the API every WANGP_POLL_INTERVAL_SECONDS (needed to know when the job
+# is done), but we only PRINT a line every Nth poll (or when the reported
+# percentage changes), so the terminal shows steady progress instead of
+# either total silence or a flood of near-duplicate lines.
+WANGP_LOG_EVERY_N_POLLS = int(os.getenv("WANGP_LOG_EVERY_N_POLLS", "3"))
  
 # ==========================================================
 # Chroma
