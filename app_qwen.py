@@ -10,10 +10,15 @@ conservative token budgets tuned to fit under this Groq account's measured
 rather than Qwen's vision model, which has shown repeated server-side
 capacity outages on this account. Nothing here changes the default
 app_enhanced.py behavior; every override is passed explicitly per call.
+
+UI/UX (single-button, fault-tolerant, collapsible-card pipeline) matches
+app_enhanced.py; only the underlying agent calls (models, token budgets,
+step order) come from the original app_qwen.py.
 """
 
 from __future__ import annotations
 
+import html
 import json
 from pathlib import Path
 from datetime import datetime
@@ -48,20 +53,10 @@ from agents.video_agent import generate_video_assets
 # ============================================================
 # MODELS + TPM-SAFE TOKEN BUDGETS
 # ============================================================
-# Text agents use Qwen; this account's measured limit for qwen/qwen3-32b is
-# 6000 tokens/minute. A single request's cost is roughly
-# system_prompt + input_data + max_completion tokens, so every text budget
-# below leaves real headroom under that ceiling even with a full pipeline's
-# worth of input data.
-#
-# Vision uses the platform default (Llama) instead of Qwen: the Qwen vision
-# model (qwen/qwen3.6-27b) has shown repeated server-side capacity outages
-# on this account, independent of token budget or image size.
-
 VISION_MODEL = PRODUCT_MODEL
 QWEN_TEXT_MODEL = "qwen/qwen3-32b"
 
-VISION_MAX_TOKENS = 700          # vision JSON schema is ~14 short fields
+VISION_MAX_TOKENS = 700          
 RESEARCH_SETTINGS = {"num_predict": 1500}
 RESEARCH_MAX_PRICE_SOURCES = 5
 RESEARCH_MAX_COMPETITOR_SOURCES = 3
@@ -70,16 +65,10 @@ CONTENT_MAX_TOKENS = 2000
 VARIANT_SETTINGS = {"num_predict": 1200}
 COMPLIANCE_SETTINGS = {"num_predict": 1200}
 REPORT_SETTINGS = {"num_predict": 1200}
-REPORT_SECTION_MAX_CHARS = 300   # bounds each report input section's size
+REPORT_SECTION_MAX_CHARS = 300   
 
 
 def _condense_for_report(data: dict | None, max_chars: int = REPORT_SECTION_MAX_CHARS) -> dict:
-    """
-    Bound every top-level field's size before it reaches the report
-    prompt, so the report step's total size stays predictable regardless
-    of how verbose upstream agents get -- the report system prompt alone
-    is already ~2100 tokens, leaving little room to spare under 6000 TPM.
-    """
     if not data:
         return {}
     condensed = {}
@@ -98,417 +87,608 @@ OUTPUT_DIR = Path("outputs")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 # ============================================================
+# PIPELINE DEFINITION
+# ============================================================
+PIPELINE_STEPS = [
+    ("product", "📦", "Product Intelligence"),
+    ("research", "🌍", "Market Intelligence"),
+    ("marketing", "📢", "Marketing Strategy"),
+    ("content", "📅", "Content Calendar"),
+    ("variants", "🎯", "Marketing Variants"),
+    ("compliance", "🛡️", "Compliance Review"),
+    ("video", "🎬", "AI Video"),
+    ("report", "📄", "Executive Report"),
+]
+
+# ============================================================
 # SESSION STATE
 # ============================================================
-DEFAULT_STATE = {
-    "product": None,
-    "research": None,
-    "marketing": None,
-    "content": None,
-    "variants": None,
-    "compliance": None,
-    "video": None,
-    "report": None,
-    "image_path": None,
+DEFAULT_STATE = {key: None for key, _, _ in PIPELINE_STEPS}
+DEFAULT_STATE.update({
     "description": "",
-}
+    "image_path": None,
+    "pipeline_error": None,
+    "current_running_key": None,
+})
 
 for key, value in DEFAULT_STATE.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
 # ============================================================
-# HEADER
+# MODERN ENTERPRISE STYLING
 # ============================================================
-st.title("📊 Enterprise AI Marketing Intelligence Platform")
-st.caption(f"Qwen text agents ({QWEN_TEXT_MODEL}) + Llama vision ({VISION_MODEL})")
-st.info(
-    "Text agents use Qwen with reduced token budgets to stay under this "
-    "account's tight rate limit. Vision uses Llama instead of Qwen, since "
-    "the Qwen vision model has shown repeated capacity outages on this "
-    "account. Text outputs may be more concise than the default (Llama) "
-    "app as a result of the reduced budgets."
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    html, body, [class*="css"] { 
+        font-family: 'Inter', sans-serif; 
+    }
+
+    .main .block-container {
+        padding-top: 2rem;
+        padding-bottom: 4rem;
+        max-width: 1200px;
+    }
+
+    .hero {
+        background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+        border-radius: 16px;
+        padding: 2.5rem;
+        margin-bottom: 2rem;
+        color: white;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .hero h1 { margin: 0; font-size: 2.2rem; font-weight: 700; color: #ffffff !important; }
+    .hero p { margin: 0.5rem 0 0 0; opacity: 0.8; font-size: 1rem; letter-spacing: 0.5px; }
+
+    .section-title {
+        font-size: 1.25rem;
+        font-weight: 700;
+        margin: 2rem 0 1rem 0;
+        padding-bottom: 0.4rem;
+        border-bottom: 2px solid #e2e8f0;
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+    }
+
+    .dash-card {
+        padding: 0.85rem 0.5rem;
+        border-radius: 10px;
+        border: 1px solid #e2e8f0;
+        background: #ffffff;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.01);
+    }
+    .dash-icon { font-size: 1.3rem; margin-bottom: 0.3rem; }
+    .dash-label { font-size: 0.78rem; font-weight: 600; color: #64748b; line-height: 1.3; height: 2.2rem; display: flex; align-items: center; justify-content: center; }
+    .dash-status { font-size: 0.85rem; margin-top: 0.4rem; font-weight: 600; }
+
+    .kv-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+    }
+    .kv-card {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 0.85rem 1rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.01);
+    }
+    .kv-label {
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #94a3b8;
+        margin-bottom: 0.3rem;
+    }
+    .kv-value { font-size: 0.95rem; font-weight: 500; color: #1e293b; line-height: 1.5; }
+    .kv-empty { color: #cbd5e1; font-style: italic; }
+
+    .nested-block {
+        border: 1px solid #f1f5f9;
+        background: #f8fafc;
+        border-radius: 12px;
+        padding: 1.2rem;
+        margin-bottom: 1rem;
+    }
+    .sub-header {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #4338ca;
+        margin-bottom: 0.8rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .reliability-row { display: flex; justify-content: flex-end; margin-bottom: 0.75rem; }
+    .assessment-box {
+        background: #f5f3ff;
+        border-left: 4px solid #6366f1;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+        font-size: 0.9rem;
+        color: #312e81;
+    }
+    .assessment-line { margin-bottom: 0.4rem; line-height: 1.5; }
+    .assessment-line:last-child { margin-bottom: 0; }
+    .assessment-label { font-weight: 700; color: #4338ca; }
+
+    details.evidence-box {
+        margin-top: 0.75rem;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 0.5rem 0.75rem;
+    }
+    details.evidence-box summary { cursor: pointer; font-weight: 600; color: #475569; font-size: 0.85rem; outline: none; }
+    details.evidence-box ul { margin: 0.5rem 0 0 1.2rem; padding: 0; color: #475569; font-size: 0.85rem; }
+    details.evidence-box li { margin-bottom: 0.3rem; line-height: 1.4; }
+
+    .step-nav { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.5rem; }
+    .step-nav a {
+        text-decoration: none;
+        background: #ffffff;
+        color: #475569;
+        border: 1px solid #e2e8f0;
+        border-radius: 20px;
+        padding: 0.4rem 1rem;
+        font-size: 0.85rem;
+        font-weight: 500;
+    }
+    .step-nav a:hover { border-color: #6366f1; color: #6366f1; }
+
+    .item-card {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 1rem;
+        margin-bottom: 0.75rem;
+    }
+    .item-card-title { font-weight: 700; color: #1e1b4b; margin-bottom: 0.75rem; font-size: 0.95rem; }
+
+    .chip-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.25rem; margin-bottom: 0.5rem; }
+    .chip {
+        background: #f1f5f9;
+        color: #334155;
+        border-radius: 6px;
+        padding: 0.25rem 0.6rem;
+        font-size: 0.8rem;
+        font-weight: 500;
+        border: 1px solid #e2e8f0;
+    }
+
+    .score-badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 6px; font-size: 0.8rem; font-weight: 600; }
+    .score-high { background: #bbf7d0; color: #15803d; }
+    .score-mid  { background: #fef08a; color: #a16207; }
+    .score-low  { background: #fecaca; color: #b91c1c; }
+
+    .stExpander {
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 14px !important;
+        background: #ffffff !important;
+        margin-bottom: 1rem !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.02) !important;
+        overflow: hidden !important;
+    }
+    
+    .plain-value { font-size: 0.95rem; color: #334155; line-height: 1.6; }
+    .empty-note { color: #94a3b8; font-style: italic; font-size: 0.9rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 # ============================================================
-# SIDEBAR
+# RENDERING HELPERS
+# ============================================================
+def humanize_key(key: str) -> str:
+    return str(key).replace("_", " ").replace("-", " ").strip().title()
+
+def format_simple_value(key: str, value) -> str:
+    key_lower = str(key).lower()
+    if value is None or value == "": return "<span class='kv-empty'>—</span>"
+    if isinstance(value, bool): return "✅ Yes" if value else "❌ No"
+    if isinstance(value, (int, float)) and any(t in key_lower for t in ("reliability", "confidence", "score")) and 0 <= float(value) <= 1:
+        pct = round(float(value) * 100)
+        css_class = "score-high" if pct >= 70 else "score-mid" if pct >= 40 else "score-low"
+        return f"<span class='score-badge {css_class}'>{pct}%</span>"
+    if key_lower == "status":
+        normalized = str(value).strip().lower()
+        if normalized in ("success", "ok", "completed", "complete"): return f"<span class='score-badge score-high'>✓ {html.escape(str(value))}</span>"
+        if normalized in ("error", "failed", "fail"): return f"<span class='score-badge score-low'>𐄂 {html.escape(str(value))}</span>"
+    return html.escape(str(value))
+
+SECTION_ICONS = {"attributes": "🧩", "assessment": "🧭", "evidence": "📎", "data_sources": "🔗", "metadata": "ℹ️", "limitations": "⚠️"}
+INSIGHT_KEYS = {"attributes", "assessment", "evidence", "reliability"}
+
+def is_insight_block(data: dict) -> bool:
+    keys = set(data.keys())
+    return "attributes" in keys and isinstance(data.get("attributes"), dict) and keys.issubset(INSIGHT_KEYS)
+
+def render_insight_block_html(data: dict, depth: int) -> str:
+    attributes = data.get("attributes") or {}
+    assessment = data.get("assessment") or {}
+    evidence = data.get("evidence") or []
+    reliability = data.get("reliability")
+    parts = []
+
+    if isinstance(reliability, (int, float)) and 0 <= float(reliability) <= 1:
+        pct = round(float(reliability) * 100)
+        css_class = "score-high" if pct >= 70 else "score-mid" if pct >= 40 else "score-low"
+        parts.append(f"<div class='reliability-row'><span class='score-badge {css_class}'>🎯 Reliability: {pct}%</span></div>")
+
+    if attributes: parts.append(render_dict_html(attributes, depth=depth))
+    if assessment:
+        lines = "".join(f"<div class='assessment-line'><span class='assessment-label'>{html.escape(humanize_key(k))}:</span> {html.escape(str(v)) if str(v).strip() else '—'}</div>" for k, v in assessment.items())
+        if lines: parts.append(f"<div class='assessment-box'>{lines}</div>")
+    if evidence:
+        ev_items = "".join(f"<li>{html.escape(str(e))}</li>" for e in evidence if e not in (None, ""))
+        if ev_items: parts.append(f"<details class='evidence-box'><summary>View Verifiable Evidence ({len(evidence)})</summary><ul>{ev_items}</ul></details>")
+    return "".join(parts)
+
+def render_dict_html(data: dict, depth: int = 0) -> str:
+    if not data: return "<div class='empty-note'>No details available.</div>"
+    if is_insight_block(data): return render_insight_block_html(data, depth)
+    
+    simple_items, complex_items = {}, {}
+    for k, v in data.items():
+        if isinstance(v, (dict, list)) and v: complex_items[k] = v
+        else: simple_items[k] = v if not isinstance(v, (dict, list)) else None
+    parts = []
+
+    if simple_items:
+        cells = "".join(f"<div class='kv-card'><div class='kv-label'>{html.escape(humanize_key(k))}</div><div class='kv-value'>{format_simple_value(k, v)}</div></div>" for k, v in simple_items.items())
+        parts.append(f"<div class='kv-grid'>{cells}</div>")
+
+    for k, v in complex_items.items():
+        icon = SECTION_ICONS.get(str(k).lower(), "👉")
+        inner = render_value_html(v, depth=depth + 1)
+        parts.append(f"<div class='nested-block'><div class='sub-header'>{icon} {html.escape(humanize_key(k))}</div>{inner}</div>")
+    return "".join(parts)
+
+def render_list_html(items: list, depth: int = 0) -> str:
+    if not items: return "<div class='empty-note'>No records.</div>"
+    if all(isinstance(i, dict) for i in items):
+        cards = []
+        for idx, item in enumerate(items, start=1):
+            title = item.get("title") or item.get("name") or item.get("platform") or item.get("day") or item.get("week") or item.get("action") or item.get("id") or f"Entry {idx}"
+            cards.append(f"<div class='item-card'><div class='item-card-title'>{idx}. {html.escape(str(title))}</div>{render_dict_html(item, depth=depth + 1)}</div>")
+        return "".join(cards)
+    if all(isinstance(i, (str, int, float, bool)) or i is None for i in items):
+        chips = "".join(f"<span class='chip'>{html.escape(str(i))}</span>" for i in items if i not in (None, ""))
+        return f"<div class='chip-row'>{chips}</div>"
+    parts = []
+    for idx, item in enumerate(items, start=1):
+        parts.append(f"<div style='font-weight:600; font-size:0.9rem; margin-top:0.5rem;'>#{idx}</div>")
+        parts.append(render_value_html(item, depth=depth + 1))
+    return "".join(parts)
+
+def render_value_html(value, depth: int = 0) -> str:
+    if value is None: return "<div class='empty-note'>—</div>"
+    if isinstance(value, dict): return render_dict_html(value, depth=depth)
+    if isinstance(value, list): return render_list_html(value, depth=depth)
+    if isinstance(value, bool): return f"<div class='plain-value'>{'✅ Yes' if value else '❌ No'}</div>"
+    if isinstance(value, str):
+        text = html.escape(value).replace("\n", "<br>") if value.strip() else "—"
+        return f"<div class='plain-value'>{text}</div>"
+    return f"<div class='plain-value'>{html.escape(str(value))}</div>"
+
+def render_section(icon: str, title: str, step_num: int, data) -> None:
+    is_expanded = (step_num == 1)
+    if title == "Executive Report" and isinstance(data, dict):
+        keys_to_delete = {
+            "implementation_roadmap", "implementation roadmap",
+            "kpi_framework", "kpi framework",
+            "executive_verdict", "executive verdict",
+            "narrative_report", "narrative report"
+        }
+        data = {k: v for k, v in data.items() if str(k).lower().strip() not in keys_to_delete}
+
+    with st.expander(f"{step_num}️⃣ {icon} {title}", expanded=is_expanded):
+        body_html = render_value_html(data, depth=0)
+        st.markdown(f"<div class='step-body'>{body_html}</div>", unsafe_allow_html=True)
+
+# ============================================================
+# HEADER & STATIC APP HERO
+# ============================================================
+st.markdown(
+    f"""<div class="hero"><h1>📊 Enterprise AI Marketing Intelligence Platform</h1>
+    <p>Qwen text agents ({QWEN_TEXT_MODEL}) + Llama vision ({VISION_MODEL})</p></div>""",
+    unsafe_allow_html=True,
+)
+
+# ============================================================
+# LIVE EXECUTIVE DASHBOARD PLACEHOLDER
+# ============================================================
+st.markdown("<div class='section-title'>📈 Real-time Pipeline Status</div>", unsafe_allow_html=True)
+dashboard_placeholder = st.empty()
+
+def render_live_dashboard():
+    with dashboard_placeholder.container():
+        dash_cols = st.columns(len(PIPELINE_STEPS))
+        for col, (key, icon, title) in zip(dash_cols, PIPELINE_STEPS):
+            state_val = st.session_state.get(key)
+            
+            if state_val is not None and isinstance(state_val, dict) and "node_error" in state_val:
+                status_icon = "<span style='color: #b91c1c;'>❌ Error</span>"
+            elif state_val is not None:
+                status_icon = "<span style='color: #15803d;'>🟢 Ready</span>"
+            elif st.session_state.current_running_key == key:
+                status_icon = "<span style='color: #b45309;'>🟡 Processing...</span>"
+            else:
+                status_icon = "<span style='color: #94a3b8;'>⚪ Idle</span>"
+
+            card_html = f"""
+            <div class='dash-card'>
+                <div class='dash-icon'>{icon}</div>
+                <div class='dash-label'>{html.escape(title)}</div>
+                <div class='dash-status'>{status_icon}</div>
+            </div>
+            """
+            with col:
+                st.markdown(card_html, unsafe_allow_html=True)
+        
+        resolved_nodes = sum(st.session_state.get(key) is not None for key, _, _ in PIPELINE_STEPS)
+        progress = resolved_nodes / len(PIPELINE_STEPS)
+        st.progress(progress)
+        st.caption(f"Engine Processing Integrity: {resolved_nodes} out of {len(PIPELINE_STEPS)} nodes diagnostic verified")
+
+# Render Initial Static State
+render_live_dashboard()
+
+# ============================================================
+# SIDEBAR CONFIGURATION
 # ============================================================
 with st.sidebar:
     st.header("⚙️ Business Constraints")
+    country = st.selectbox("Country", ["Egypt", "Saudi Arabia", "UAE", "Qatar", "Kuwait"])
+    budget = st.selectbox("Budget", ["Low", "Medium", "High"])
+    campaign_duration = st.selectbox("Campaign Duration", ["1 Month", "3 Months", "6 Months", "12 Months"])
+    primary_goal = st.selectbox("Primary Goal", ["Increase Sales", "Brand Awareness", "Lead Generation", "Market Expansion"])
+    brand_stage = st.selectbox("Brand Stage", ["New Product Launch", "Growth", "Mature", "Rebranding"])
 
-    country = st.selectbox(
-        "Country",
-        ["Egypt", "Saudi Arabia", "UAE", "Qatar", "Kuwait"]
-    )
-
-    budget = st.selectbox(
-        "Budget",
-        ["Low", "Medium", "High"]
-    )
-
-    campaign_duration = st.selectbox(
-        "Campaign Duration",
-        ["1 Month", "3 Months", "6 Months", "12 Months"]
-    )
-
-    primary_goal = st.selectbox(
-        "Primary Goal",
-        ["Increase Sales", "Brand Awareness", "Lead Generation", "Market Expansion"]
-    )
-
-    brand_stage = st.selectbox(
-        "Brand Stage",
-        ["New Product Launch", "Growth", "Mature", "Rebranding"]
-    )
-
-business_constraints = {
-    "country": country,
-    "budget": budget,
-    "campaign_duration": campaign_duration,
-    "primary_goal": primary_goal,
-    "brand_stage": brand_stage,
-}
+business_constraints = {"country": country, "budget": budget, "campaign_duration": campaign_duration, "primary_goal": primary_goal, "brand_stage": brand_stage}
 
 # ============================================================
-# PRODUCT INPUT
+# PRODUCT DATA CONFIGURATION INPUTS
 # ============================================================
-st.subheader("🛍 Product Input")
-
-description = st.text_area(
-    "Product Description",
-    height=180,
-    placeholder="Describe your product..."
-)
-
-uploaded_image = st.file_uploader(
-    "Optional Product Image",
-    type=["png", "jpg", "jpeg"]
-)
-
-image_path = None
-if uploaded_image:
-    image_path = OUTPUT_DIR / uploaded_image.name
-    with open(image_path, "wb") as f:
-        f.write(uploaded_image.read())
-    image_path = str(image_path)
+st.markdown("<div class='section-title'>🛍️ Product Input</div>", unsafe_allow_html=True)
+with st.container(border=True):
+    description = st.text_area("Product Description", height=150, placeholder="Describe your product...")
+    uploaded_image = st.file_uploader("Optional Product Image", type=["png", "jpg", "jpeg"])
+    image_path = None
+    if uploaded_image:
+        image_path = OUTPUT_DIR / uploaded_image.name
+        with open(image_path, "wb") as f:
+            f.write(uploaded_image.read())
+        image_path = str(image_path)
+        st.image(uploaded_image, caption=f"Loaded Asset: {uploaded_image.name}", width=240)
 
 # ============================================================
-# PRODUCT ANALYSIS
+# RESULTS CONTAINERS PLACEHOLDERS (For real-time step outputs)
 # ============================================================
-col1, col2 = st.columns([1, 1])
+st.markdown("<div class='section-title'>🗂️ Analysis Results Node</div>", unsafe_allow_html=True)
 
-with col1:
-    if st.button("🔍 Analyze Product", use_container_width=True):
-        if not description.strip():
-            st.warning("Please enter a product description.")
-        else:
-            with st.spinner("Analyzing Product..."):
-                try:
-                    product = analyze_product(
-                        text_description=description,
-                        image_path=image_path,
-                        model=VISION_MODEL,
-                        max_completion_tokens=VISION_MAX_TOKENS,
-                    )
-                    if "error" in product:
-                        st.error(product["error"])
-                    else:
-                        st.session_state.product = product
-                        st.session_state.description = description
-                        st.success("Product analysis completed.")
-                except Exception as exc:
-                    st.exception(exc)
+cards_placeholders = {key: st.empty() for key, _, _ in PIPELINE_STEPS}
+video_player_placeholder = st.empty()
 
-with col2:
-    if st.button("🗑 Clear Results", use_container_width=True):
-        st.session_state.product = None
-        st.session_state.research = None
-        st.session_state.marketing = None
-        st.session_state.variants = None
-        st.session_state.report = None
-        st.session_state.compliance = None
-        st.session_state.content = None
-        st.session_state.video = None
-        st.rerun()
+def render_step_card_live(step_key: str):
+    for idx, (key, icon, title) in enumerate(PIPELINE_STEPS, start=1):
+        if key == step_key and st.session_state.get(key):
+            with cards_placeholders[key].container():
+                render_section(icon, title, idx, st.session_state[key])
+
+# ريندير الكروت المخزنة مسبقاً أول ما الصفحة تفتح أو يعاد بناؤها
+for key, _, _ in PIPELINE_STEPS:
+    render_step_card_live(key)
 
 # ============================================================
-# DISPLAY PRODUCT RESULT
+# MULTI-AGENT EXECUTION RUNNER (Fault-Tolerant Loop Mode)
 # ============================================================
-if st.session_state.product:
-    st.divider()
-    st.subheader("📦 Product Intelligence")
-    product = st.session_state.product
+st.markdown("<br>", unsafe_allow_html=True)
+run_col, clear_col = st.columns([4, 1])
 
-    tab1, tab2, tab3, tab4 = st.tabs(["Identity", "Visual", "Features", "JSON"])
+with run_col:
+    run_clicked = st.button("🚀 Run Full Pipeline", use_container_width=True, type="primary")
+with clear_col:
+    clear_clicked = st.button("🗑️ Reset Workspace", use_container_width=True)
 
-    with tab1:
-        st.json({
-            "product_name": product.get("product_name"),
-            "brand": product.get("brand"),
-            "category": product.get("category"),
-            "subcategory": product.get("subcategory"),
-            "product_type": product.get("product_type"),
-        })
+if clear_clicked:
+    for key, _, _ in PIPELINE_STEPS:
+        st.session_state[key] = None
+    st.session_state.pipeline_error = None
+    st.session_state.current_running_key = None
+    st.rerun()
 
-    with tab2:
-        st.json({
-            "colors": product.get("colors"),
-            "materials": product.get("materials"),
-            "design_style": product.get("design_style"),
-            "shape": product.get("shape"),
-            "surface_finish": product.get("surface_finish"),
-        })
-
-    with tab3:
-        st.json({
-            "features": product.get("features"),
-            "visible_text": product.get("visible_text"),
-            "visible_logos": product.get("visible_logos"),
-        })
-
-    with tab4:
-        st.json(product)
-
-# ============================================================
-# MARKET RESEARCH
-# ============================================================
-st.divider()
-st.subheader("🌍 Market Intelligence")
-
-if st.button("📈 Research Market", use_container_width=True):
-    if not st.session_state.product:
-        st.warning("Analyze a product first.")
+if run_clicked:
+    if not description.strip():
+        st.warning("Please enter a product description.")
     else:
-        with st.spinner("Researching Market..."):
+        st.session_state.description = description
+        st.session_state.image_path = image_path
+        for key, _, _ in PIPELINE_STEPS:
+            st.session_state[key] = None
+        st.session_state.pipeline_error = None
+        st.session_state.current_running_key = None
+        
+        for kp in cards_placeholders.values():
+            kp.empty()
+        video_player_placeholder.empty()
+        render_live_dashboard()
+
+        status_box = st.status("Running the Qwen-powered pipeline (fault-tolerant mode)...", expanded=True)
+
+        with status_box:
+            # 1. Product Node
+            st.session_state.current_running_key = "product"
+            render_live_dashboard()
+            st.write("📦 Analyzing product...")
             try:
+                product = analyze_product(
+                    text_description=description,
+                    image_path=image_path,
+                    model=VISION_MODEL,
+                    max_completion_tokens=VISION_MAX_TOKENS,
+                )
+                if isinstance(product, dict) and "error" in product: raise RuntimeError(product["error"])
+                st.session_state.product = product
+                render_step_card_live("product")
+            except Exception as e:
+                st.session_state.product = {"node_error": str(e), "message": "Failed to analyze product."}
+                st.error(f"Node Error [Product Intelligence]: {e}")
+
+            # 2. Research Node
+            st.session_state.current_running_key = "research"
+            render_live_dashboard()
+            st.write("🌍 Researching market...")
+            try:
+                prod_data = st.session_state.product if "node_error" not in st.session_state.product else {}
                 research = research_market(
-                    st.session_state.product,
+                    prod_data,
                     model=QWEN_TEXT_MODEL,
                     settings_overrides=RESEARCH_SETTINGS,
                     max_price_sources=RESEARCH_MAX_PRICE_SOURCES,
                     max_competitor_sources=RESEARCH_MAX_COMPETITOR_SOURCES,
                 )
-                if "error" in research:
-                    st.error(research["error"])
-                else:
-                    st.session_state.research = research
-                    st.success("Market research completed.")
-            except Exception as exc:
-                st.exception(exc)
+                if isinstance(research, dict) and "error" in research: raise RuntimeError(research["error"])
+                st.session_state.research = research
+                render_step_card_live("research")
+            except Exception as e:
+                st.session_state.research = {"node_error": str(e), "message": "Market research failed."}
+                st.error(f"Node Error [Market Intelligence]: {e}")
 
-if st.session_state.research:
-    st.subheader("📊 Market Intelligence Result")
-    st.json(st.session_state.research)
-
-# ============================================================
-# MARKETING STRATEGY
-# ============================================================
-st.divider()
-st.subheader("📢 Marketing Strategy")
-
-if st.button("🚀 Generate Marketing Strategy", use_container_width=True):
-    if st.session_state.product is None:
-        st.warning("Analyze the product first.")
-    elif st.session_state.research is None:
-        st.warning("Run Market Research first.")
-    else:
-        with st.spinner("Generating Marketing Strategy..."):
+            # 3. Marketing Strategy Node
+            st.session_state.current_running_key = "marketing"
+            render_live_dashboard()
+            st.write("📢 Building marketing strategy...")
             try:
+                prod_data = st.session_state.product if "node_error" not in st.session_state.product else {}
+                res_data = st.session_state.research if "node_error" not in st.session_state.research else {}
                 marketing = build_marketing_strategy(
-                    product_intelligence=st.session_state.product,
-                    market_intelligence=st.session_state.research,
+                    product_intelligence=prod_data,
+                    market_intelligence=res_data,
                     business_constraints=business_constraints,
                     model=QWEN_TEXT_MODEL,
                     settings_overrides=MARKETING_SETTINGS,
                 )
-                if "error" in marketing:
-                    st.error(marketing["error"])
-                else:
-                    st.session_state.marketing = marketing
-                    st.success("Marketing Strategy generated successfully.")
-            except Exception as exc:
-                st.exception(exc)
+                if isinstance(marketing, dict) and "error" in marketing: raise RuntimeError(marketing["error"])
+                st.session_state.marketing = marketing
+                render_step_card_live("marketing")
+            except Exception as e:
+                st.session_state.marketing = {"node_error": str(e), "message": "Marketing strategy generation failed."}
+                st.error(f"Node Error [Marketing Strategy]: {e}")
 
-if st.session_state.marketing:
-    st.subheader("📈 Marketing Strategy Result")
-    st.json(st.session_state.marketing)
-
-# ============================================================
-# CONTENT CALENDAR
-# ============================================================
-st.divider()
-st.subheader("📅 Content Calendar")
-
-if st.button("📅 Generate Content Calendar", use_container_width=True):
-    if st.session_state.marketing is None:
-        st.warning("Generate Marketing Strategy first.")
-    else:
-        with st.spinner("Generating Content Calendar..."):
+            # 4. Content Calendar Node
+            st.session_state.current_running_key = "content"
+            render_live_dashboard()
+            st.write("📅 Generating content calendar...")
             try:
+                mark_data = st.session_state.marketing if "node_error" not in st.session_state.marketing else {}
                 content = generate_content(
-                    st.session_state.marketing,
+                    mark_data,
                     model=QWEN_TEXT_MODEL,
                     max_completion_tokens=CONTENT_MAX_TOKENS,
                 )
+                if isinstance(content, dict) and "error" in content: raise RuntimeError(content["error"])
                 st.session_state.content = content
-                st.success("Content Calendar generated.")
-            except Exception as exc:
-                st.exception(exc)
+                render_step_card_live("content")
+            except Exception as e:
+                st.session_state.content = {"node_error": str(e), "message": "Content calendar generation failed."}
+                st.error(f"Node Error [Content Calendar]: {e}")
 
-if st.session_state.content:
-    st.subheader("📅 Generated Content")
-    st.json(st.session_state.content)
-
-# ============================================================
-# VARIANT GENERATION
-# ============================================================
-st.divider()
-st.subheader("🎯 Marketing Variants")
-
-if st.button("✨ Generate Ad Variants", use_container_width=True):
-    if st.session_state.marketing is None:
-        st.warning("Generate Marketing Strategy first.")
-    else:
-        with st.spinner("Generating Marketing Variants..."):
+            # 5. Variants Node
+            st.session_state.current_running_key = "variants"
+            render_live_dashboard()
+            st.write("🎯 Generating marketing variants...")
             try:
+                mark_data = st.session_state.marketing if "node_error" not in st.session_state.marketing else {}
+                cont_data = st.session_state.content if "node_error" not in st.session_state.content else None
                 variants = generate_variants(
-                    st.session_state.marketing,
-                    st.session_state.content,
+                    mark_data,
+                    cont_data,
                     model=QWEN_TEXT_MODEL,
                     settings_overrides=VARIANT_SETTINGS,
                 )
-                if "error" in variants:
-                    st.error(variants["error"])
-                else:
-                    st.session_state.variants = variants
-                    st.success("Marketing Variants generated successfully.")
-            except Exception as exc:
-                st.exception(exc)
+                if isinstance(variants, dict) and "error" in variants: raise RuntimeError(variants["error"])
+                st.session_state.variants = variants
+                render_step_card_live("variants")
+            except Exception as e:
+                st.session_state.variants = {"node_error": str(e), "message": "Marketing variant generation failed."}
+                st.error(f"Node Error [Marketing Variants]: {e}")
 
-if st.session_state.variants:
-    st.subheader("🎨 Generated Variants")
-    st.json(st.session_state.variants)
-
-# ============================================================
-# COMPLIANCE REVIEW
-# ============================================================
-st.divider()
-st.subheader("🛡 Compliance Review")
-
-if st.button("🛡 Generate Compliance", use_container_width=True):
-    if st.session_state.marketing is None:
-        st.warning("Generate Marketing Strategy first.")
-    elif st.session_state.variants is None:
-        st.warning("Generate Variants first.")
-    else:
-        with st.spinner("Checking Compliance..."):
+            # 6. Compliance Node
+            st.session_state.current_running_key = "compliance"
+            render_live_dashboard()
+            st.write("🛡️ Reviewing compliance...")
             try:
+                mark_data = st.session_state.marketing if "node_error" not in st.session_state.marketing else {}
+                var_data = st.session_state.variants if "node_error" not in st.session_state.variants else {}
                 compliance = generate_compliance(
-                    st.session_state.marketing,
-                    st.session_state.variants,
+                    mark_data,
+                    var_data,
                     model=QWEN_TEXT_MODEL,
                     settings_overrides=COMPLIANCE_SETTINGS,
                 )
+                if isinstance(compliance, dict) and "error" in compliance: raise RuntimeError(compliance["error"])
                 st.session_state.compliance = compliance
-                st.success("Compliance completed.")
-            except Exception as exc:
-                st.exception(exc)
+                render_step_card_live("compliance")
+            except Exception as e:
+                st.session_state.compliance = {"node_error": str(e), "message": "Compliance review failed."}
+                st.error(f"Node Error [Compliance Review]: {e}")
 
-if st.session_state.compliance:
-    st.subheader("🛡 Compliance Result")
-    st.json(st.session_state.compliance)
+            # 7. Video Node
+            st.session_state.current_running_key = "video"
+            render_live_dashboard()
+            st.write(f"🎬 Generating video (Qwen prompts: {QWEN_TEXT_MODEL})...")
+            try:
+                total_variants = 2  
+                video_progress_bar = st.progress(0, text="Enhancing prompts with Qwen...")
+                video_status = st.empty()
 
-# ============================================================
-# VIDEO GENERATION
-# ============================================================
-st.divider()
-st.subheader("🎬 AI Video")
-st.caption(
-    f"Two DISTINCT creative prompts (enhanced by Qwen: {QWEN_TEXT_MODEL}, "
-    "grounded in your marketing strategy + content plan), each rendered as "
-    "its own separate video via the deployed WanGP API."
-)
+                def _on_video_progress(variant, total, pct, status, phase):
+                    total = total or total_variants
+                    done_variants = variant - 1
+                    fraction = (pct or 0) / 100
+                    overall = (done_variants + fraction) / total
+                    overall = min(max(overall, 0.0), 1.0)
+                    label = f"Variant {variant}/{total}: {status}"
+                    if pct is not None: label += f" ({pct}%)"
+                    if phase: label += f" — {phase}"
+                    video_progress_bar.progress(overall, text=label)
+                    video_status.caption(label)
 
-if st.button("🎥 Generate Video", use_container_width=True):
-    if not description.strip():
-        st.warning("Please enter a product description first.")
-    else:
-        total_variants = 2  # WANGP_NUM_VARIANTS
-        progress_bar = st.progress(0, text="Enhancing prompts with Qwen...")
-        variant_status = st.empty()
-
-        def _on_video_progress(variant, total, pct, status, phase):
-            # Overall progress = variants fully done + current variant's
-            # fractional progress, spread evenly across all variants.
-            total = total or total_variants
-            done_variants = variant - 1
-            fraction = (pct or 0) / 100
-            overall = (done_variants + fraction) / total
-            overall = min(max(overall, 0.0), 1.0)
-            label = f"Variant {variant}/{total}: {status}"
-            if pct is not None:
-                label += f" ({pct}%)"
-            if phase:
-                label += f" — {phase}"
-            progress_bar.progress(overall, text=label)
-            variant_status.caption(label)
-
-        try:
-            video = generate_video_assets(
-                description=description,
-                product=st.session_state.product,
-                marketing=st.session_state.marketing,
-                content=st.session_state.content,
-                image_path=image_path,
-                on_progress=_on_video_progress,
-            )
-            if "error" in video:
-                progress_bar.empty()
-                variant_status.empty()
-                st.error(video["error"])
-            else:
+                video = generate_video_assets(
+                    description=description,
+                    product=st.session_state.product,
+                    marketing=st.session_state.marketing,
+                    content=st.session_state.content,
+                    image_path=image_path,
+                    on_progress=_on_video_progress,
+                )
+                if isinstance(video, dict) and "error" in video: raise RuntimeError(video["error"])
                 st.session_state.video = video
-                progress_bar.progress(1.0, text="Done — 2 videos rendered")
-                variant_status.empty()
-                st.success("Videos generated.")
-        except Exception as exc:
-            progress_bar.empty()
-            variant_status.empty()
-            st.exception(exc)
+                video_progress_bar.progress(1.0, text="Done — 2 videos rendered")
+                video_status.empty()
+                
+                render_step_card_live("video")
+            except Exception as e:
+                st.session_state.video = {"node_error": str(e), "message": "Video generation failed."}
+                st.error(f"Node Error [AI Video]: {e}")
 
-if st.session_state.video:
-    st.subheader("🎬 Generated Video")
-
-    if "variants" in st.session_state.video:
-        variants = st.session_state.video["variants"]
-        cols = st.columns(len(variants) or 1)
-        for col, variant in zip(cols, variants):
-            with col:
-                st.markdown(f"**Variant {variant.get('variant')}**")
-                st.caption(variant.get("prompt", ""))
-                if variant.get("status") == "succeeded" and variant.get("video_path"):
-                    st.video(variant["video_path"])
-                else:
-                    st.error(variant.get("error", "Generation failed"))
-
-        with st.expander("Raw video result JSON"):
-            st.json(st.session_state.video)
-    else:
-        st.json(st.session_state.video)
-
-
-
-# ============================================================
-# EXECUTIVE REPORT
-# ============================================================
-st.divider()
-st.subheader("📄 Executive Report")
-
-if st.button("📝 Generate Executive Report", use_container_width=True):
-    if st.session_state.marketing is None:
-        st.warning("Generate Marketing Strategy first.")
-    else:
-        with st.spinner("Generating Executive Report..."):
+            # 8. Report Node
+            st.session_state.current_running_key = "report"
+            render_live_dashboard()
+            st.write("📄 Generating executive report...")
             try:
                 report = generate_report(
                     product_intelligence=_condense_for_report(st.session_state.product),
@@ -520,146 +700,86 @@ if st.button("📝 Generate Executive Report", use_container_width=True):
                     model=QWEN_TEXT_MODEL,
                     settings_overrides=REPORT_SETTINGS,
                 )
-                if "error" in report:
-                    st.error(report["error"])
-                else:
-                    st.session_state.report = report
-                    st.success("Executive Report generated.")
+                if isinstance(report["error"]) if isinstance(report, dict) and "error" in report else False: raise RuntimeError(report["error"])
+                st.session_state.report = report
+                render_step_card_live("report")
+            except Exception as e:
+                st.session_state.report = {"node_error": str(e), "message": "Executive report generation failed."}
+                st.error(f"Node Error [Executive Report]: {e}")
+
+            st.session_state.current_running_key = None
+            render_live_dashboard()
+
+        status_box.update(label="✅ Pipeline run completed (review node errors below if any)", state="complete", expanded=False)
+
+# ============================================================
+# PERSISTENT MULTI-MODAL PLAYER
+# ============================================================
+if st.session_state.get("video") and "node_error" not in st.session_state["video"]:
+    with video_player_placeholder.container():
+        st.markdown("<div style='font-size:0.95rem; font-weight:700; color:#312e81; margin: 0.5rem 0;'>🎬 Rendered AI Video Previews</div>", unsafe_allow_html=True)
+        video_data = st.session_state["video"]
+        if "variants" in video_data:
+            v_variants = video_data["variants"]
+            v_cols = st.columns(len(v_variants) or 1)
+            for col, variant in zip(v_cols, v_variants):
+                with col:
+                    st.markdown(f"**Variant {variant.get('variant')}**")
+                    st.caption(variant.get("prompt", ""))
+                    if variant.get("status") == "succeeded" and variant.get("video_path"):
+                        st.video(variant["video_path"])
+                    else:
+                        st.error(variant.get("error", "Generation failed"))
+
+# ============================================================
+# STRATEGIC ASSET DATA EXPORT
+# ============================================================
+if st.session_state.get("report") and "node_error" not in st.session_state.report:
+    st.markdown("<div class='section-title'>💾 Export</div>", unsafe_allow_html=True)
+    save_col, pdf_col = st.columns(2)
+
+    with save_col:
+        if st.button("💾 Save Results (JSON)", use_container_width=True):
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_folder = OUTPUT_DIR / timestamp
+            output_folder.mkdir(exist_ok=True)
+            files = {
+                "product.json": st.session_state.product, "research.json": st.session_state.research,
+                "marketing.json": st.session_state.marketing, "content.json": st.session_state.content,
+                "variants.json": st.session_state.variants, "compliance.json": st.session_state.compliance,
+                "video.json": st.session_state.video, "report.json": st.session_state.report,
+            }
+            for filename, data in files.items():
+                with open(output_folder / filename, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=4, ensure_ascii=False)
+            st.success(f"Saved to {output_folder}")
+
+    with pdf_col:
+        if st.button("📄 Export PDF", use_container_width=True):
+            pdf_path = OUTPUT_DIR / "Executive_Report.pdf"
+            try:
+                generate_pdf(st.session_state.report.get("narrative_report", ""), str(pdf_path))
+                st.success("PDF generated successfully.")
+                with open(pdf_path, "rb") as pdf_file:
+                    st.download_button(
+                        label="⬇ Download PDF", data=pdf_file, file_name="Executive_Report.pdf",
+                        mime="application/pdf", use_container_width=True,
+                    )
             except Exception as exc:
                 st.exception(exc)
 
-if st.session_state.report:
-    st.subheader("📋 Executive Report")
-    report_text_tab, report_json_tab = st.tabs(["Readable Report", "JSON"])
-    with report_text_tab:
-        st.text(st.session_state.report.get("narrative_report", "No narrative report available."))
-    with report_json_tab:
-        st.json(st.session_state.report)
-
-    st.download_button(
-        label="⬇ Download Report (Text)",
-        data=st.session_state.report.get("narrative_report", ""),
-        file_name="Executive_Report.txt",
-        mime="text/plain",
-        use_container_width=True,
-    )
-
-# ============================================================
-# SAVE JSON FILES
-# ============================================================
-if st.session_state.report:
-    if st.button("💾 Save Results", use_container_width=True):
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_folder = OUTPUT_DIR / timestamp
-        output_folder.mkdir(exist_ok=True)
-
-        files = {
-            "product.json": st.session_state.product,
-            "research.json": st.session_state.research,
-            "marketing.json": st.session_state.marketing,
-            "content.json": st.session_state.content,
-            "variants.json": st.session_state.variants,
-            "compliance.json": st.session_state.compliance,
-            "video.json": st.session_state.video,
-            "report.json": st.session_state.report,
-        }
-
-        for filename, data in files.items():
-            with open(output_folder / filename, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=4, ensure_ascii=False)
-
-        st.success(f"Saved to {output_folder}")
-
-# ============================================================
-# PDF EXPORT
-# ============================================================
-if st.session_state.report:
-    if st.button("📄 Export PDF", use_container_width=True):
-        pdf_path = OUTPUT_DIR / "Executive_Report.pdf"
-        try:
-            generate_pdf(st.session_state.report.get("narrative_report", ""), str(pdf_path))
-            st.success("PDF generated successfully.")
-
-            with open(pdf_path, "rb") as pdf_file:
-                st.download_button(
-                    label="⬇ Download PDF",
-                    data=pdf_file,
-                    file_name="Executive_Report.pdf",
-                    mime="application/pdf",
-                )
-        except Exception as exc:
-            st.exception(exc)
-
-# ============================================================
-# DASHBOARD
-# ============================================================
-st.divider()
-st.header("📊 Executive Dashboard")
-
-col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
-with col1:
-    st.metric("Product", "✅" if st.session_state.product else "❌")
-with col2:
-    st.metric("Market", "✅" if st.session_state.research else "❌")
-with col3:
-    st.metric("Marketing", "✅" if st.session_state.marketing else "❌")
-with col4:
-    st.metric("Content", "✅" if st.session_state.content else "❌")
-with col5:
-    st.metric("Variants", "✅" if st.session_state.variants else "❌")
-with col6:
-    st.metric("Compliance", "✅" if st.session_state.compliance else "❌")
-with col7:
-    st.metric("Video", "✅" if st.session_state.video else "❌")
-with col8:
-    st.metric("Report", "✅" if st.session_state.report else "❌")
-
-# ============================================================
-# PIPELINE STATUS
-# ============================================================
-completed = sum([
-    bool(st.session_state.product),
-    bool(st.session_state.research),
-    bool(st.session_state.marketing),
-    bool(st.session_state.content),
-    bool(st.session_state.variants),
-    bool(st.session_state.compliance),
-    bool(st.session_state.video),
-    bool(st.session_state.report),
-])
-
-progress = completed / 8
-
-st.progress(progress)
-st.caption(f"Pipeline Progress: {completed}/8")
-
-# ============================================================
-# RAW JSON
-# ============================================================
-with st.expander("🔎 View Complete Pipeline JSON"):
-    st.json({
-        "product": st.session_state.product,
-        "research": st.session_state.research,
-        "marketing": st.session_state.marketing,
-        "content": st.session_state.content,
-        "variants": st.session_state.variants,
-        "compliance": st.session_state.compliance,
-        "video": st.session_state.video,
-        "report": st.session_state.report,
-    })
-
-# ============================================================
-# RESET
-# ============================================================
-st.divider()
-if st.button("♻ Reset Session", use_container_width=True):
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
-    st.rerun()
+    if st.session_state.report.get("narrative_report"):
+        st.download_button(
+            label="⬇ Download Report (Text)", data=st.session_state.report.get("narrative_report", ""),
+            file_name="Executive_Report.txt", mime="text/plain", use_container_width=True,
+        )
 
 # ============================================================
 # FOOTER
 # ============================================================
 st.divider()
-st.caption("Enterprise AI Marketing Intelligence Platform -- Qwen variant")
-st.caption(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+foot_col1, foot_col2 = st.columns(2)
+with foot_col1:
+    st.caption("Enterprise AI Marketing Intelligence Platform -- Qwen variant")
+with foot_col2:
+    st.caption(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
