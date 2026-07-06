@@ -40,7 +40,7 @@ st.set_page_config(
 # ============================================================
 # IMPORT AGENTS
 # ============================================================
-from agents.variant_agent import generate_variants
+from agents.variant_agent import generate_variants, extract_hooks_and_ctas
 from agents.product_agent import analyze_product
 from agents.research_agent import research_market
 from agents.marketing_strategy_agent import build_marketing_strategy
@@ -66,6 +66,7 @@ VARIANT_SETTINGS = {"num_predict": 1200}
 COMPLIANCE_SETTINGS = {"num_predict": 1200}
 REPORT_SETTINGS = {"num_predict": 1200}
 REPORT_SECTION_MAX_CHARS = 300   
+ENABLE_VIDEO = False
 
 
 def _condense_for_report(data: dict | None, max_chars: int = REPORT_SECTION_MAX_CHARS) -> dict:
@@ -613,17 +614,68 @@ if run_clicked:
             try:
                 mark_data = st.session_state.marketing if "node_error" not in st.session_state.marketing else {}
                 cont_data = st.session_state.content if "node_error" not in st.session_state.content else None
-                variants = generate_variants(
-                    mark_data,
-                    cont_data,
-                    model=QWEN_TEXT_MODEL,
-                    settings_overrides=VARIANT_SETTINGS,
-                )
+                all_days = []
+
+                days = cont_data.get("days", []) if cont_data else []
+
+                # Accumulates hooks/CTAs across the loop so each new day's
+                # call knows exactly what earlier days already used, instead
+                # of each day being generated in isolation.
+                used_hooks: list[str] = []
+                used_ctas: list[str] = []
+
+                for day in days:
+
+                    day_content = {
+                        "days": [day]
+                    }
+
+                    day_variants = generate_variants(
+                        mark_data,
+                        day_content,
+                        model=QWEN_TEXT_MODEL,
+                        settings_overrides=VARIANT_SETTINGS,
+                        previous_hooks=used_hooks,
+                        previous_ctas=used_ctas,
+                    )
+
+                    if isinstance(day_variants, dict) and "error" in day_variants:
+                        raise RuntimeError(day_variants["error"])
+
+                    new_hooks, new_ctas = extract_hooks_and_ctas(day_variants)
+                    used_hooks.extend(new_hooks)
+                    used_ctas.extend(new_ctas)
+
+                    all_days.append({
+                        "day": day.get("day"),
+                        "platform": day.get("platform"),
+                        "topic": day.get("post_idea"),
+                        "variants": day_variants,
+                    })
+
+                variants = {
+                    "days": all_days,
+                    "metadata": {
+                        "agent": "variant",
+                        "status": "success"
+                    }
+                }
                 if isinstance(variants, dict) and "error" in variants: raise RuntimeError(variants["error"])
                 st.session_state.variants = variants
                 render_step_card_live("variants")
             except Exception as e:
-                st.session_state.variants = {"node_error": str(e), "message": "Marketing variant generation failed."}
+                import traceback
+
+                traceback.print_exc()
+                print("=" * 60)
+                print("VARIANT ERROR")
+                print(e)
+                print("=" * 60)
+
+                st.session_state.variants = {
+                    "node_error": str(e),
+                    "message": "Marketing variant generation failed."
+                }
                 st.error(f"Node Error [Marketing Variants]: {e}")
 
             # 6. Compliance Node
@@ -646,45 +698,62 @@ if run_clicked:
                 st.session_state.compliance = {"node_error": str(e), "message": "Compliance review failed."}
                 st.error(f"Node Error [Compliance Review]: {e}")
 
-            # 7. Video Node
+           # 7. Video Node
             st.session_state.current_running_key = "video"
             render_live_dashboard()
-            st.write(f"🎬 Generating video (Qwen prompts: {QWEN_TEXT_MODEL})...")
-            try:
-                total_variants = 2  
-                video_progress_bar = st.progress(0, text="Enhancing prompts with Qwen...")
-                video_status = st.empty()
 
-                def _on_video_progress(variant, total, pct, status, phase):
-                    total = total or total_variants
-                    done_variants = variant - 1
-                    fraction = (pct or 0) / 100
-                    overall = (done_variants + fraction) / total
-                    overall = min(max(overall, 0.0), 1.0)
-                    label = f"Variant {variant}/{total}: {status}"
-                    if pct is not None: label += f" ({pct}%)"
-                    if phase: label += f" — {phase}"
-                    video_progress_bar.progress(overall, text=label)
-                    video_status.caption(label)
+            if ENABLE_VIDEO:
+                st.write(f"🎬 Generating video (Qwen prompts: {QWEN_TEXT_MODEL})...")
 
-                video = generate_video_assets(
-                    description=description,
-                    product=st.session_state.product,
-                    marketing=st.session_state.marketing,
-                    content=st.session_state.content,
-                    image_path=image_path,
-                    on_progress=_on_video_progress,
-                )
-                if isinstance(video, dict) and "error" in video: raise RuntimeError(video["error"])
-                st.session_state.video = video
-                video_progress_bar.progress(1.0, text="Done — 2 videos rendered")
-                video_status.empty()
-                
-                render_step_card_live("video")
-            except Exception as e:
-                st.session_state.video = {"node_error": str(e), "message": "Video generation failed."}
-                st.error(f"Node Error [AI Video]: {e}")
+                try:
+                    total_variants = 2
+                    video_progress_bar = st.progress(0, text="Enhancing prompts with Qwen...")
+                    video_status = st.empty()
 
+                    def _on_video_progress(variant, total, pct, status, phase):
+                        total = total or total_variants
+                        done_variants = variant - 1
+                        fraction = (pct or 0) / 100
+                        overall = (done_variants + fraction) / total
+                        overall = min(max(overall, 0.0), 1.0)
+
+                        label = f"Variant {variant}/{total}: {status}"
+                        if pct is not None:
+                            label += f" ({pct}%)"
+                        if phase:
+                            label += f" — {phase}"
+
+                        video_progress_bar.progress(overall, text=label)
+                        video_status.caption(label)
+
+                    video = generate_video_assets(
+                        description=description,
+                        product=st.session_state.product,
+                        marketing=st.session_state.marketing,
+                        content=st.session_state.content,
+                        image_path=image_path,
+                        on_progress=_on_video_progress,
+                    )
+
+                    if isinstance(video, dict) and "error" in video:
+                        raise RuntimeError(video["error"])
+
+                    st.session_state.video = video
+                    video_progress_bar.progress(1.0, text="Done — 2 videos rendered")
+                    video_status.empty()
+
+                    render_step_card_live("video")
+
+                except Exception as e:
+                    st.session_state.video = {
+                        "node_error": str(e),
+                        "message": "Video generation failed."
+                    }
+                    st.error(f"Node Error [AI Video]: {e}")
+
+            else:
+                st.write("⏭️ Video generation skipped.")
+                st.session_state.video = {}
             # 8. Report Node
             st.session_state.current_running_key = "report"
             render_live_dashboard()

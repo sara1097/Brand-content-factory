@@ -110,7 +110,7 @@ AGENT_SETTINGS = {
 
     "num_ctx": 8192,
 
-    "num_predict": 1800
+    "num_predict": 3500
 
 },
 "compliance": {

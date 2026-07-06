@@ -95,14 +95,15 @@ def run_pipeline(
     print("STEP 7 : VIDEO GENERATION")
     print("=" * 60)
 
-    video = generate_video_assets(
-        description=text_description,
-        product=product,
-        marketing=marketing,
-        content=content,
-        image_path=image_path,
-    )
-    save_json("video.json", video)
+    video = {}
+    # video = generate_video_assets(
+    #     description=text_description,
+    #     product=product,
+    #     marketing=marketing,
+    #     content=content,
+    #     image_path=image_path,
+    # )
+    # save_json("video.json", video)
 
     report = generate_report(
         product,
