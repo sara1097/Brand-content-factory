@@ -10,10 +10,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p data/chroma_db data/outputs outputs
+RUN mkdir -p outputs
 
 EXPOSE 8501
 
 HEALTHCHECK CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')" || exit 1
 
-ENTRYPOINT ["streamlit", "run", "app_enhanced.py", "--server.port=8501", "--server.address=0.0.0.0"]
+ENTRYPOINT ["streamlit", "run", "app_qwen.py", "--server.port=8501", "--server.address=0.0.0.0"]

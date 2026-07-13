@@ -14,6 +14,10 @@ from core.validator import validate_output
 from agents.prompts.variant_prompt import (
     VARIANT_SYSTEM_PROMPT,
     VARIANT_TASK_PROMPT,
+    BANNED_OPENERS,
+    BANNED_CTA_PATTERNS,
+    BANNED_WORDS_OVERUSED,
+    format_used_list,
 )
 
 # ============================================================
@@ -191,8 +195,17 @@ def build_variant_input(marketing: dict, content: dict | None = None) -> dict:
 # BUILD USER PROMPT
 # ============================================================
 
-def build_user_prompt(data: dict) -> str:
-    
+def build_user_prompt(
+    data: dict,
+    previous_hooks: list[str] | None = None,
+    previous_ctas: list[str] | None = None,
+) -> str:
+    """
+    previous_hooks / previous_ctas: hooks and CTAs already generated on
+    earlier days of THIS SAME campaign. Pass these in every call so the
+    model actually knows what it already wrote, instead of just being told
+    "don't repeat yourself" with nothing to compare against.
+    """
 
     return VARIANT_TASK_PROMPT.format(
 
@@ -225,7 +238,33 @@ def build_user_prompt(data: dict) -> str:
         call_to_actions="\n".join(
             f"- {i}" for i in data["call_to_actions"]
         ),
+
+        previous_hooks=format_used_list(previous_hooks, "hooks"),
+
+        previous_ctas=format_used_list(previous_ctas, "CTAs"),
+
+        banned_openers=format_used_list(BANNED_OPENERS, "openers"),
+
+        banned_ctas=format_used_list(BANNED_CTA_PATTERNS, "CTA patterns"),
+
+        banned_words=format_used_list(BANNED_WORDS_OVERUSED, "words"),
     )
+
+
+def extract_hooks_and_ctas(variant_result: dict) -> tuple[list[str], list[str]]:
+    """
+    Pull the hook and cta out of variant_a/b/c from a generated result, so
+    the caller (the day-by-day loop) can accumulate them and feed them back
+    in as previous_hooks/previous_ctas on the next day's call.
+    """
+    hooks, ctas = [], []
+    for key in ("variant_a", "variant_b", "variant_c"):
+        variant = variant_result.get(key) or {}
+        if variant.get("hook"):
+            hooks.append(variant["hook"])
+        if variant.get("cta"):
+            ctas.append(variant["cta"])
+    return hooks, ctas
 # ============================================================
 # ENSURE OUTPUT SHAPE
 # ============================================================
@@ -277,9 +316,15 @@ def generate_variants(
     content: dict | None = None,
     model: str | None = None,
     settings_overrides: dict | None = None,
+    previous_hooks: list[str] | None = None,
+    previous_ctas: list[str] | None = None,
 ) -> dict:
     """
     Generate A/B/C ad variants from Marketing Strategy and Content Calendar.
+
+    previous_hooks / previous_ctas: pass in the hooks/CTAs already generated
+    on earlier days of this campaign (see extract_hooks_and_ctas below) so
+    the model avoids repeating them.
     """
 
     if not marketing_strategy:
@@ -289,7 +334,7 @@ def generate_variants(
 
     variant_input = build_variant_input(marketing_strategy, content)
 
-    user_prompt = build_user_prompt(variant_input)
+    user_prompt = build_user_prompt(variant_input, previous_hooks, previous_ctas)
 
     settings = AGENT_SETTINGS["variant"].copy()
     if settings_overrides:
@@ -335,5 +380,3 @@ def generate_variants(
 }
 
     return result
-
-    

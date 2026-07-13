@@ -22,9 +22,21 @@ from config import (
     DEFAULT_MODEL,
 )
 
-client = Groq(
-    api_key=GROQ_API_KEY
-)
+_client: Groq | None = None
+
+
+def get_client() -> Groq:
+    # Created on first use, not at import time, so the app can start and
+    # show a readable "missing key" message instead of a traceback.
+    global _client
+    if _client is None:
+        if not GROQ_API_KEY or GROQ_API_KEY == "your-groq-api-key-here":
+            raise RuntimeError(
+                "GROQ_API_KEY is not set. Copy .env.example to .env in the "
+                "project root and put your real key in it."
+            )
+        _client = Groq(api_key=GROQ_API_KEY)
+    return _client
 
 # ==========================================================
 # RETRY / RATE LIMIT HANDLING
@@ -123,7 +135,7 @@ def create_chat_completion(*, model: str, disable_reasoning: bool = True, **kwar
         params = dict(kwargs, model=model)
         if with_reasoning_off:
             params["reasoning_effort"] = "none"
-        return client.chat.completions.create(**params)
+        return get_client().chat.completions.create(**params)
 
     if disable_reasoning and _is_reasoning_model(model):
         try:

@@ -62,6 +62,15 @@ WANGP_API_URL = os.getenv(
     "WANGP_API_URL",
     "https://sagdafathy--wangp-api-fastapi-app.modal.run",
 ).rstrip("/")
+
+# Feature toggle: set ENABLE_VIDEO_GENERATION=false in .env to skip the
+# WanGP video node entirely (renders take ~10 min and hit the Modal GPU,
+# so turn this off for fast/cheap test runs). The sidebar checkbox in
+# app_qwen.py defaults to this value and can override it per run.
+ENABLE_VIDEO_GENERATION = (
+    os.getenv("ENABLE_VIDEO_GENERATION", "true").strip().lower()
+    not in {"0", "false", "no", "off"}
+)
  
 # Number of distinct video prompts/videos to generate per request. The
 # two prompts are different creative directions for the same product, not
@@ -100,6 +109,43 @@ WANGP_MAX_WAIT_SECONDS = float(os.getenv("WANGP_MAX_WAIT_SECONDS", "900"))
 # either total silence or a flood of near-duplicate lines.
 WANGP_LOG_EVERY_N_POLLS = int(os.getenv("WANGP_LOG_EVERY_N_POLLS", "3"))
  
+# ==========================================================
+# Magic Hour Image Generation API
+# ==========================================================
+# Used by tools/magichour_client.py for the 4 image-day posts of the
+# 7-day calendar (text prompt + product reference image -> image).
+
+MAGICHOUR_API_KEY = os.getenv("MAGICHOUR_API_KEY")
+
+MAGICHOUR_API_URL = os.getenv("MAGICHOUR_API_URL", "https://api.magichour.ai").rstrip("/")
+
+# Polling cadence / ceiling while waiting for a Magic Hour image job.
+MAGICHOUR_POLL_INTERVAL_SECONDS = float(os.getenv("MAGICHOUR_POLL_INTERVAL_SECONDS", "5"))
+MAGICHOUR_MAX_WAIT_SECONDS = float(os.getenv("MAGICHOUR_MAX_WAIT_SECONDS", "600"))
+MAGICHOUR_HTTP_TIMEOUT_SECONDS = float(os.getenv("MAGICHOUR_HTTP_TIMEOUT_SECONDS", "60"))
+
+# ==========================================================
+# Product image auto-sourcing (web scrape + vision validation)
+# ==========================================================
+# When the user runs the pipeline without uploading a product photo, we
+# search the web for candidate images and let the vision model confirm
+# one matches the description before using it as the reference image.
+
+# How many scraped candidate images to try before giving up.
+IMAGE_SCRAPE_MAX_CANDIDATES = int(os.getenv("IMAGE_SCRAPE_MAX_CANDIDATES", "5"))
+
+# Minimum confidence (0-1) the vision validator must report for a
+# scraped image to be accepted as the product reference image.
+IMAGE_MATCH_MIN_CONFIDENCE = float(os.getenv("IMAGE_MATCH_MIN_CONFIDENCE", "0.6"))
+
+# ==========================================================
+# 7-day content calendar media mix
+# ==========================================================
+# Fixed per-week media plan: 2 video days + 4 image days + 1 text-only
+# day = 7 posts. Video days map onto the WANGP_NUM_VARIANTS videos and
+# image days are rendered through Magic Hour.
+MEDIA_MIX = {"video": 2, "image": 4, "text": 1}
+
 # ==========================================================
 # Chroma
 # ==========================================================

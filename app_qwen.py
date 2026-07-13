@@ -14,18 +14,27 @@ app_enhanced.py behavior; every override is passed explicitly per call.
 UI/UX (single-button, fault-tolerant, collapsible-card pipeline) matches
 app_enhanced.py; only the underlying agent calls (models, token budgets,
 step order) come from the original app_qwen.py.
+
+Orchestration is a LangGraph StateGraph (graph/builder.py): a sequential
+analysis chain, then a parallel fan-out where ad variants, 2 WanGP
+videos and 4 Magic Hour images are produced for the 7-day calendar
+(2 video days + 4 image days + 1 text-only day), joined into a final
+per-day plan with media attached. If no product photo is uploaded, a
+web-scraped image validated by the vision model is used instead.
 """
 
 from __future__ import annotations
 
 import html
 import json
+import threading
 from pathlib import Path
 from datetime import datetime
 
 import streamlit as st
+from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
-from config import PRODUCT_MODEL
+from config import ENABLE_VIDEO_GENERATION, GROQ_API_KEY
 
 # ============================================================
 # PAGE CONFIG
@@ -38,47 +47,25 @@ st.set_page_config(
 )
 
 # ============================================================
-# IMPORT AGENTS
+# API KEY GUARD
 # ============================================================
-from agents.variant_agent import generate_variants
-from agents.product_agent import analyze_product
-from agents.research_agent import research_market
-from agents.marketing_strategy_agent import build_marketing_strategy
-from agents.report_agent import generate_report
+if not GROQ_API_KEY or GROQ_API_KEY == "your-groq-api-key-here":
+    st.error(
+        "🔑 **GROQ_API_KEY is missing.** Open the `.env` file in the project "
+        "folder and replace the placeholder with your real Groq API key "
+        "(free at https://console.groq.com/keys), then refresh this page."
+    )
+    st.stop()
+
+# ============================================================
+# IMPORT PIPELINE (LangGraph) + PDF EXPORT
+# ============================================================
+# All agent calls, model choices and TPM-safe token budgets now live in
+# graph/nodes.py; the execution order lives in graph/builder.py. The app
+# only streams the compiled graph and renders each node's output.
+from graph.builder import get_pipeline_graph
+from graph.nodes import QWEN_TEXT_MODEL, VISION_MODEL
 from reports.pdf_generator import generate_pdf
-from agents.compliance_agent import generate_compliance
-from agents.content_agent import generate_content
-from agents.video_agent import generate_video_assets
-
-# ============================================================
-# MODELS + TPM-SAFE TOKEN BUDGETS
-# ============================================================
-VISION_MODEL = PRODUCT_MODEL
-QWEN_TEXT_MODEL = "qwen/qwen3-32b"
-
-VISION_MAX_TOKENS = 700          
-RESEARCH_SETTINGS = {"num_predict": 1500}
-RESEARCH_MAX_PRICE_SOURCES = 5
-RESEARCH_MAX_COMPETITOR_SOURCES = 3
-MARKETING_SETTINGS = {"num_predict": 900}
-CONTENT_MAX_TOKENS = 2000
-VARIANT_SETTINGS = {"num_predict": 1200}
-COMPLIANCE_SETTINGS = {"num_predict": 1200}
-REPORT_SETTINGS = {"num_predict": 1200}
-REPORT_SECTION_MAX_CHARS = 300   
-
-
-def _condense_for_report(data: dict | None, max_chars: int = REPORT_SECTION_MAX_CHARS) -> dict:
-    if not data:
-        return {}
-    condensed = {}
-    for key, value in data.items():
-        if key in {"data_sources", "metadata", "evidence", "strategy_score"}:
-            continue
-        text = json.dumps(value, ensure_ascii=False)
-        condensed[key] = value if len(text) <= max_chars else text[:max_chars] + "...(truncated)"
-    return condensed
-
 
 # ============================================================
 # OUTPUT DIRECTORY
@@ -90,15 +77,33 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 # PIPELINE DEFINITION
 # ============================================================
 PIPELINE_STEPS = [
+    ("image_acquisition", "🔎", "Image Sourcing"),
     ("product", "📦", "Product Intelligence"),
     ("research", "🌍", "Market Intelligence"),
     ("marketing", "📢", "Marketing Strategy"),
     ("content", "📅", "Content Calendar"),
     ("variants", "🎯", "Marketing Variants"),
     ("compliance", "🛡️", "Compliance Review"),
-    ("video", "🎬", "AI Video"),
+    ("video", "🎬", "AI Videos"),
+    ("images", "🖼️", "AI Post Images"),
+    ("final_calendar", "🗓️", "Final 7-Day Plan"),
     ("report", "📄", "Executive Report"),
 ]
+
+# Maps a LangGraph node name to the status line shown when it finishes.
+NODE_LABELS = {
+    "acquire_image": "🔎 Product image sourcing",
+    "product": "📦 Product intelligence",
+    "research": "🌍 Market research",
+    "marketing": "📢 Marketing strategy",
+    "content": "📅 Content calendar",
+    "variants": "🎯 Marketing variants",
+    "compliance": "🛡️ Compliance review",
+    "video": "🎬 AI videos (WanGP)",
+    "images": "🖼️ AI post images (Magic Hour)",
+    "assemble": "🗓️ Final 7-day plan assembly",
+    "report": "📄 Executive report",
+}
 
 # ============================================================
 # SESSION STATE
@@ -291,6 +296,16 @@ st.markdown(
 # ============================================================
 # RENDERING HELPERS
 # ============================================================
+def st_image_full_width(image) -> None:
+    """st.image at full column width on any Streamlit version:
+    `use_container_width` only exists from 1.40; older versions
+    (including the pinned 1.39) take `use_column_width`."""
+    try:
+        st.image(image, use_container_width=True)
+    except TypeError:
+        st.image(image, use_column_width=True)
+
+
 def humanize_key(key: str) -> str:
     return str(key).replace("_", " ").replace("-", " ").strip().title()
 
@@ -457,6 +472,15 @@ with st.sidebar:
     primary_goal = st.selectbox("Primary Goal", ["Increase Sales", "Brand Awareness", "Lead Generation", "Market Expansion"])
     brand_stage = st.selectbox("Brand Stage", ["New Product Launch", "Growth", "Mature", "Rebranding"])
 
+    st.header("🧪 Generation Options")
+    enable_video = st.checkbox(
+        "🎬 Generate AI videos (WanGP)",
+        value=ENABLE_VIDEO_GENERATION,
+        help="Videos take ~10 minutes on the Modal GPU. Turn off for fast "
+             "test runs — the rest of the pipeline (images, calendar, report) "
+             "still runs normally.",
+    )
+
 business_constraints = {"country": country, "budget": budget, "campaign_duration": campaign_duration, "primary_goal": primary_goal, "brand_stage": brand_stage}
 
 # ============================================================
@@ -526,187 +550,103 @@ if run_clicked:
         video_player_placeholder.empty()
         render_live_dashboard()
 
-        status_box = st.status("Running the Qwen-powered pipeline (fault-tolerant mode)...", expanded=True)
+        status_box = st.status("Running the LangGraph pipeline (fault-tolerant mode)...", expanded=True)
 
         with status_box:
-            # 1. Product Node
-            st.session_state.current_running_key = "product"
+            # UI callbacks are invoked from LangGraph worker threads;
+            # Streamlit widgets only work there once the script-run
+            # context is attached to that thread.
+            script_ctx = get_script_run_ctx()
+
+            def _attach_ctx():
+                try:
+                    add_script_run_ctx(threading.current_thread(), script_ctx)
+                except Exception:
+                    pass
+
+            acquire_status_holder = st.empty()
+            video_bar_holder = st.empty()
+            image_bar_holder = st.empty()
+
+            def _on_acquire_status(text):
+                _attach_ctx()
+                acquire_status_holder.caption(f"🔎 {text}")
+
+            def _on_video_progress(variant, total, pct, status, phase):
+                _attach_ctx()
+                total = total or 1
+                fraction = (pct or 0) / 100
+                overall = min(max(((variant - 1) + fraction) / total, 0.0), 1.0)
+                label = f"🎬 Video {variant}/{total}: {status}"
+                if pct is not None: label += f" ({pct}%)"
+                if phase: label += f" — {phase}"
+                video_bar_holder.progress(overall, text=label)
+
+            def _on_image_progress(index, total, text):
+                _attach_ctx()
+                image_bar_holder.progress(min(max(index / max(total, 1), 0.0), 1.0), text=f"🖼️ {text}")
+
+            def _first_pending_key():
+                for key, _, _ in PIPELINE_STEPS:
+                    if st.session_state.get(key) is None:
+                        return key
+                return None
+
+            initial_state = {
+                "description": description,
+                "uploaded_image_path": image_path,
+                "business_constraints": business_constraints,
+                "enable_video": enable_video,
+            }
+            run_config = {"configurable": {
+                "on_acquire_status": _on_acquire_status,
+                "on_video_progress": _on_video_progress,
+                "on_image_progress": _on_image_progress,
+            }}
+
+            st.session_state.current_running_key = "image_acquisition"
             render_live_dashboard()
-            st.write("📦 Analyzing product...")
+
             try:
-                product = analyze_product(
-                    text_description=description,
-                    image_path=image_path,
-                    model=VISION_MODEL,
-                    max_completion_tokens=VISION_MAX_TOKENS,
-                )
-                if isinstance(product, dict) and "error" in product: raise RuntimeError(product["error"])
-                st.session_state.product = product
-                render_step_card_live("product")
+                for update in get_pipeline_graph().stream(initial_state, config=run_config, stream_mode="updates"):
+                    for node_name, delta in update.items():
+                        if not isinstance(delta, dict):
+                            continue
+
+                        for key, value in delta.items():
+                            st.session_state[key] = value
+                            render_step_card_live(key)
+
+                        label = NODE_LABELS.get(node_name, node_name)
+                        node_errors = [
+                            v["node_error"] for v in delta.values()
+                            if isinstance(v, dict) and "node_error" in v
+                        ]
+                        if node_errors:
+                            st.error(f"Node Error [{label}]: {node_errors[0]}")
+                        else:
+                            st.write(f"{label} — done ✓")
+
+                        # Show the scraped product image as soon as the
+                        # vision model has validated one.
+                        if node_name == "acquire_image":
+                            acquisition = st.session_state.get("image_acquisition") or {}
+                            if acquisition.get("source") == "scraped":
+                                st.image(
+                                    acquisition["image_path"],
+                                    caption="Web-scraped product image (validated by the vision model)",
+                                    width=240,
+                                )
+                            acquire_status_holder.empty()
+
+                        st.session_state.current_running_key = _first_pending_key()
+                        render_live_dashboard()
             except Exception as e:
-                st.session_state.product = {"node_error": str(e), "message": "Failed to analyze product."}
-                st.error(f"Node Error [Product Intelligence]: {e}")
+                st.session_state.pipeline_error = str(e)
+                st.error(f"Pipeline error: {e}")
 
-            # 2. Research Node
-            st.session_state.current_running_key = "research"
-            render_live_dashboard()
-            st.write("🌍 Researching market...")
-            try:
-                prod_data = st.session_state.product if "node_error" not in st.session_state.product else {}
-                research = research_market(
-                    prod_data,
-                    model=QWEN_TEXT_MODEL,
-                    settings_overrides=RESEARCH_SETTINGS,
-                    max_price_sources=RESEARCH_MAX_PRICE_SOURCES,
-                    max_competitor_sources=RESEARCH_MAX_COMPETITOR_SOURCES,
-                )
-                if isinstance(research, dict) and "error" in research: raise RuntimeError(research["error"])
-                st.session_state.research = research
-                render_step_card_live("research")
-            except Exception as e:
-                st.session_state.research = {"node_error": str(e), "message": "Market research failed."}
-                st.error(f"Node Error [Market Intelligence]: {e}")
-
-            # 3. Marketing Strategy Node
-            st.session_state.current_running_key = "marketing"
-            render_live_dashboard()
-            st.write("📢 Building marketing strategy...")
-            try:
-                prod_data = st.session_state.product if "node_error" not in st.session_state.product else {}
-                res_data = st.session_state.research if "node_error" not in st.session_state.research else {}
-                marketing = build_marketing_strategy(
-                    product_intelligence=prod_data,
-                    market_intelligence=res_data,
-                    business_constraints=business_constraints,
-                    model=QWEN_TEXT_MODEL,
-                    settings_overrides=MARKETING_SETTINGS,
-                )
-                if isinstance(marketing, dict) and "error" in marketing: raise RuntimeError(marketing["error"])
-                st.session_state.marketing = marketing
-                render_step_card_live("marketing")
-            except Exception as e:
-                st.session_state.marketing = {"node_error": str(e), "message": "Marketing strategy generation failed."}
-                st.error(f"Node Error [Marketing Strategy]: {e}")
-
-            # 4. Content Calendar Node
-            st.session_state.current_running_key = "content"
-            render_live_dashboard()
-            st.write("📅 Generating content calendar...")
-            try:
-                mark_data = st.session_state.marketing if "node_error" not in st.session_state.marketing else {}
-                content = generate_content(
-                    mark_data,
-                    model=QWEN_TEXT_MODEL,
-                    max_completion_tokens=CONTENT_MAX_TOKENS,
-                )
-                if isinstance(content, dict) and "error" in content: raise RuntimeError(content["error"])
-                st.session_state.content = content
-                render_step_card_live("content")
-            except Exception as e:
-                st.session_state.content = {"node_error": str(e), "message": "Content calendar generation failed."}
-                st.error(f"Node Error [Content Calendar]: {e}")
-
-            # 5. Variants Node
-            st.session_state.current_running_key = "variants"
-            render_live_dashboard()
-            st.write("🎯 Generating marketing variants...")
-            try:
-                mark_data = st.session_state.marketing if "node_error" not in st.session_state.marketing else {}
-                cont_data = st.session_state.content if "node_error" not in st.session_state.content else None
-                variants = generate_variants(
-                    mark_data,
-                    cont_data,
-                    model=QWEN_TEXT_MODEL,
-                    settings_overrides=VARIANT_SETTINGS,
-                )
-                if isinstance(variants, dict) and "error" in variants: raise RuntimeError(variants["error"])
-                st.session_state.variants = variants
-                render_step_card_live("variants")
-            except Exception as e:
-                st.session_state.variants = {"node_error": str(e), "message": "Marketing variant generation failed."}
-                st.error(f"Node Error [Marketing Variants]: {e}")
-
-            # 6. Compliance Node
-            st.session_state.current_running_key = "compliance"
-            render_live_dashboard()
-            st.write("🛡️ Reviewing compliance...")
-            try:
-                mark_data = st.session_state.marketing if "node_error" not in st.session_state.marketing else {}
-                var_data = st.session_state.variants if "node_error" not in st.session_state.variants else {}
-                compliance = generate_compliance(
-                    mark_data,
-                    var_data,
-                    model=QWEN_TEXT_MODEL,
-                    settings_overrides=COMPLIANCE_SETTINGS,
-                )
-                if isinstance(compliance, dict) and "error" in compliance: raise RuntimeError(compliance["error"])
-                st.session_state.compliance = compliance
-                render_step_card_live("compliance")
-            except Exception as e:
-                st.session_state.compliance = {"node_error": str(e), "message": "Compliance review failed."}
-                st.error(f"Node Error [Compliance Review]: {e}")
-
-            # 7. Video Node
-            st.session_state.current_running_key = "video"
-            render_live_dashboard()
-            st.write(f"🎬 Generating video (Qwen prompts: {QWEN_TEXT_MODEL})...")
-            try:
-                total_variants = 2  
-                video_progress_bar = st.progress(0, text="Enhancing prompts with Qwen...")
-                video_status = st.empty()
-
-                def _on_video_progress(variant, total, pct, status, phase):
-                    total = total or total_variants
-                    done_variants = variant - 1
-                    fraction = (pct or 0) / 100
-                    overall = (done_variants + fraction) / total
-                    overall = min(max(overall, 0.0), 1.0)
-                    label = f"Variant {variant}/{total}: {status}"
-                    if pct is not None: label += f" ({pct}%)"
-                    if phase: label += f" — {phase}"
-                    video_progress_bar.progress(overall, text=label)
-                    video_status.caption(label)
-
-                video = generate_video_assets(
-                    description=description,
-                    product=st.session_state.product,
-                    marketing=st.session_state.marketing,
-                    content=st.session_state.content,
-                    image_path=image_path,
-                    on_progress=_on_video_progress,
-                )
-                if isinstance(video, dict) and "error" in video: raise RuntimeError(video["error"])
-                st.session_state.video = video
-                video_progress_bar.progress(1.0, text="Done — 2 videos rendered")
-                video_status.empty()
-                
-                render_step_card_live("video")
-            except Exception as e:
-                st.session_state.video = {"node_error": str(e), "message": "Video generation failed."}
-                st.error(f"Node Error [AI Video]: {e}")
-
-            # 8. Report Node
-            st.session_state.current_running_key = "report"
-            render_live_dashboard()
-            st.write("📄 Generating executive report...")
-            try:
-                report = generate_report(
-                    product_intelligence=_condense_for_report(st.session_state.product),
-                    market_intelligence=_condense_for_report(st.session_state.research),
-                    marketing_strategy=_condense_for_report(st.session_state.marketing),
-                    variants=_condense_for_report(st.session_state.variants),
-                    compliance=_condense_for_report(st.session_state.compliance),
-                    content=_condense_for_report(st.session_state.content),
-                    model=QWEN_TEXT_MODEL,
-                    settings_overrides=REPORT_SETTINGS,
-                )
-                if isinstance(report["error"]) if isinstance(report, dict) and "error" in report else False: raise RuntimeError(report["error"])
-                st.session_state.report = report
-                render_step_card_live("report")
-            except Exception as e:
-                st.session_state.report = {"node_error": str(e), "message": "Executive report generation failed."}
-                st.error(f"Node Error [Executive Report]: {e}")
-
+            video_bar_holder.empty()
+            image_bar_holder.empty()
             st.session_state.current_running_key = None
             render_live_dashboard()
 
@@ -717,19 +657,97 @@ if run_clicked:
 # ============================================================
 if st.session_state.get("video") and "node_error" not in st.session_state["video"]:
     with video_player_placeholder.container():
-        st.markdown("<div style='font-size:0.95rem; font-weight:700; color:#312e81; margin: 0.5rem 0;'>🎬 Rendered AI Video Previews</div>", unsafe_allow_html=True)
         video_data = st.session_state["video"]
-        if "variants" in video_data:
+        if video_data.get("variants"):
+            st.markdown("<div style='font-size:0.95rem; font-weight:700; color:#312e81; margin: 0.5rem 0;'>🎬 Rendered AI Video Previews</div>", unsafe_allow_html=True)
             v_variants = video_data["variants"]
             v_cols = st.columns(len(v_variants) or 1)
             for col, variant in zip(v_cols, v_variants):
                 with col:
-                    st.markdown(f"**Variant {variant.get('variant')}**")
+                    day_label = f" — Day {variant['day']}" if variant.get("day") else ""
+                    st.markdown(f"**Variant {variant.get('variant')}{day_label}**")
                     st.caption(variant.get("prompt", ""))
                     if variant.get("status") == "succeeded" and variant.get("video_path"):
                         st.video(variant["video_path"])
                     else:
                         st.error(variant.get("error", "Generation failed"))
+
+# ============================================================
+# GENERATED POST IMAGES GALLERY (Magic Hour)
+# ============================================================
+if st.session_state.get("images") and "node_error" not in st.session_state["images"]:
+    images_data = st.session_state["images"]
+    if images_data.get("images"):
+        st.markdown("<div style='font-size:0.95rem; font-weight:700; color:#312e81; margin: 0.5rem 0;'>🖼️ Generated Post Images</div>", unsafe_allow_html=True)
+        img_items = images_data["images"]
+        img_cols = st.columns(len(img_items) or 1)
+        for col, item in zip(img_cols, img_items):
+            with col:
+                st.markdown(f"**Day {item.get('day')}**")
+                if item.get("status") == "succeeded" and item.get("image_path"):
+                    st_image_full_width(item["image_path"])
+                    st.caption(item.get("prompt", "")[:140])
+                else:
+                    st.error(item.get("error", "Generation failed"))
+
+# ============================================================
+# FINAL 7-DAY CONTENT PLAN (text + attached media per day)
+# ============================================================
+if st.session_state.get("final_calendar") and "node_error" not in st.session_state["final_calendar"]:
+    final_plan = st.session_state["final_calendar"]
+    st.markdown("<div class='section-title'>🗓️ Final 7-Day Content Plan</div>", unsafe_allow_html=True)
+    mix = final_plan.get("media_mix", {})
+    st.caption(
+        f"Campaign: {final_plan.get('campaign_name', '—')} · "
+        f"{mix.get('video', 0)} video days · {mix.get('image', 0)} image days · "
+        f"{mix.get('text', 0)} text-only day"
+    )
+    MEDIA_BADGES = {"video": "🎬 Video", "image": "🖼️ Image", "text": "✍️ Text only"}
+    for day in final_plan.get("days", []):
+        media_type = day.get("media_type", "text")
+        with st.container(border=True):
+            text_col, media_col = st.columns([3, 2])
+            with text_col:
+                st.markdown(
+                    f"**Day {day.get('day')} — {MEDIA_BADGES.get(media_type, media_type)}** · "
+                    f"{day.get('platform', '')} · {day.get('content_format', '')}"
+                )
+                if day.get("hook"):
+                    st.markdown(f"*{day['hook']}*")
+                if day.get("caption"):
+                    st.write(day["caption"])
+                if day.get("hashtags"):
+                    st.caption(" ".join(day["hashtags"]))
+                if day.get("cta"):
+                    st.caption(f"CTA: {day['cta']}")
+            with media_col:
+                if media_type == "text":
+                    st.caption("No media required for this day.")
+                elif day.get("media_status") == "skipped":
+                    st.caption("Video generation was disabled for this run.")
+                elif day.get("media_status") == "succeeded" and day.get("media_path"):
+                    if media_type == "video":
+                        st.video(day["media_path"])
+                    else:
+                        st_image_full_width(day["media_path"])
+                else:
+                    st.warning(day.get("media_error") or f"Media {day.get('media_status', 'missing')}.")
+
+            extra = day.get("extra_caption")
+            if extra:
+                source_note = (
+                    "Compliance-reviewed ad variant"
+                    if extra.get("source") == "compliance_safe"
+                    else "Ad variant (compliance review unavailable)"
+                )
+                with st.expander("➕ Extra caption / more options"):
+                    if extra.get("hook"):
+                        st.markdown(f"*{extra['hook']}*")
+                    if extra.get("body"):
+                        st.write(extra["body"])
+                    if extra.get("cta"):
+                        st.caption(f"CTA: {extra['cta']}")
+                    st.caption(source_note)
 
 # ============================================================
 # STRATEGIC ASSET DATA EXPORT
@@ -744,10 +762,13 @@ if st.session_state.get("report") and "node_error" not in st.session_state.repor
             output_folder = OUTPUT_DIR / timestamp
             output_folder.mkdir(exist_ok=True)
             files = {
+                "image_acquisition.json": st.session_state.image_acquisition,
                 "product.json": st.session_state.product, "research.json": st.session_state.research,
                 "marketing.json": st.session_state.marketing, "content.json": st.session_state.content,
                 "variants.json": st.session_state.variants, "compliance.json": st.session_state.compliance,
-                "video.json": st.session_state.video, "report.json": st.session_state.report,
+                "video.json": st.session_state.video, "images.json": st.session_state.images,
+                "final_calendar.json": st.session_state.final_calendar,
+                "report.json": st.session_state.report,
             }
             for filename, data in files.items():
                 with open(output_folder / filename, "w", encoding="utf-8") as f:

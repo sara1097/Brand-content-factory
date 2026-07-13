@@ -2,7 +2,11 @@ from config import MODEL
 from tools.groq_client import create_chat_completion
 
 
-def ask_qwen(prompt: str, model: str | None = None) -> str:
+def ask_qwen(
+    prompt: str,
+    model: str | None = None,
+    max_completion_tokens: int = 4000,
+) -> str:
     response = create_chat_completion(
         model=model or MODEL,
         messages=[
@@ -30,7 +34,9 @@ Return valid JSON only.
             }
         ],
         temperature=0,
-        max_completion_tokens=4000,
+        # Groq's TPM limit counts prompt tokens PLUS this reservation,
+        # so callers with long prompts should pass a small budget here.
+        max_completion_tokens=max_completion_tokens,
     )
 
     print("\n========== GROQ USAGE ==========")

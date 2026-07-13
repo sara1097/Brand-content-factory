@@ -1,10 +1,9 @@
 import json
-import random
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
-from config import DEFAULT_MODEL
+from config import DEFAULT_MODEL, MEDIA_MIX
 from tools.groq_client import create_chat_completion
 
 load_dotenv()
@@ -32,6 +31,8 @@ VISUAL_FORMATS = {
     "infographic",
 }
 
+MEDIA_TYPES = ("video", "image", "text")
+
 SYSTEM_PROMPT = f"""
 You are a social media content strategist.
 
@@ -44,6 +45,7 @@ Return ONLY valid JSON.
             "day":1,
             "journey_stage":"string",
             "platform":"string",
+            "media_type":"one of ["video", "image", "text"]",
             "content_format":"one of {CONTENT_FORMATS}",
             "content_pillar":"string",
             "post_idea":"string",
@@ -56,7 +58,19 @@ Return ONLY valid JSON.
     ]
 }}
 
-Generate exactly 7 posts.
+Generate exactly 7 posts (day 1 to day 7).
+
+MEDIA MIX (mandatory): exactly {MEDIA_MIX["video"]} days with
+media_type "video" (an AI-generated product video will be rendered for
+them), exactly {MEDIA_MIX["image"]} days with media_type "image" (an
+AI-generated product image will be rendered for them), and exactly
+{MEDIA_MIX["text"]} day with media_type "text" (caption only, no media).
+
+- "video" days must use a video content_format (reel/tiktok/youtube_short).
+- "image" days must use a visual content_format (static_post/carousel/infographic).
+- The "text" day should be a poll or text-only discussion post.
+- For video and image days, make visual_notes a concrete art direction
+  for the generated media (setting, lighting, mood, focus).
 
 Return JSON only.
 """
@@ -137,58 +151,89 @@ def clean_calendar(calendar: dict) -> dict:
     return calendar
 
 
-def enforce_format_diversity(calendar: dict) -> dict:
+def enforce_media_mix(calendar: dict, media_mix: dict | None = None) -> dict:
+    """
+    Deterministically guarantee the weekly media plan (default: 2 video
+    days + 4 image days + 1 text-only day) no matter what the LLM
+    returned, and keep content_format consistent with each media_type.
+    Downstream, video days drive WanGP and image days drive Magic Hour.
+    """
 
-    days = calendar["days"]
+    quotas = dict(media_mix or MEDIA_MIX)
 
-    formats_used = {
-        d["content_format"]
-        for d in days
-    }
+    days = calendar.get("days", [])[: sum(quotas.values())]
 
-    static_days = [
-        d
-        for d in days
-        if d["content_format"] == "static_post"
-    ]
+    # Pad if the LLM returned fewer than 7 days, so the mix stays exact.
+    while len(days) < sum(quotas.values()):
+        days.append({
+            "day": len(days) + 1,
+            "platform": "instagram",
+            "content_format": "static_post",
+            "post_idea": f"{calendar.get('campaign_name', 'Campaign')} highlight",
+            "hook": "",
+            "caption": "",
+            "hashtags": [],
+            "cta": "",
+            "visual_notes": "",
+        })
 
-    needed = []
+    calendar["days"] = days
 
-    if not formats_used & VIDEO_FORMATS:
-        needed.append(
-            random.choice(
-                list(VIDEO_FORMATS)
-            )
-        )
+    # Pass 1: keep declared media_type while its quota lasts.
+    remaining = dict(quotas)
 
-    if not formats_used & VISUAL_FORMATS:
-        needed.append(
-            random.choice(
-                list(VISUAL_FORMATS)
-            )
-        )
+    for day in days:
+        declared = day.get("media_type")
+        if declared in MEDIA_TYPES and remaining[declared] > 0:
+            remaining[declared] -= 1
+        else:
+            day["media_type"] = None
 
-    if "poll" not in formats_used:
-        needed.append("poll")
+    # Pass 2: infer from content_format where possible, then fill with
+    # whatever quota is left, in day order.
+    for day in days:
+        if day["media_type"]:
+            continue
 
-    for fmt, day in zip(
-        needed,
-        static_days,
-    ):
+        fmt = day.get("content_format")
 
-        day["content_format"] = fmt
+        if fmt in VIDEO_FORMATS and remaining["video"] > 0:
+            chosen = "video"
+        elif fmt in VISUAL_FORMATS | {"static_post"} and remaining["image"] > 0:
+            chosen = "image"
+        else:
+            chosen = next(t for t in MEDIA_TYPES if remaining[t] > 0)
 
-        if (
-            fmt in VISUAL_FORMATS
-            and not day.get("visual_notes")
-        ):
+        day["media_type"] = chosen
+        remaining[chosen] -= 1
 
+    # Pass 3: content_format must match the media_type.
+    for i, day in enumerate(days):
+        day["day"] = i + 1
+        fmt = day.get("content_format")
+
+        if day["media_type"] == "video" and fmt not in VIDEO_FORMATS:
+            day["content_format"] = "reel"
+        elif day["media_type"] == "image" and fmt not in VISUAL_FORMATS | {"static_post"}:
+            day["content_format"] = "static_post"
+        elif day["media_type"] == "text" and fmt not in {"poll", "static_post"}:
+            day["content_format"] = "poll"
+
+        if day["media_type"] in {"video", "image"} and not day.get("visual_notes"):
             day["visual_notes"] = (
-                f"Break '{day['post_idea']}' "
-                "into 3-5 slides."
+                f"Product-centered visual for: {day.get('post_idea', 'the campaign')}."
             )
 
     return calendar
+
+
+def days_by_media_type(calendar: dict, media_type: str) -> list[dict]:
+    """Calendar days of one media_type ("video" / "image" / "text")."""
+    return [
+        day
+        for day in calendar.get("days", [])
+        if day.get("media_type") == media_type
+    ]
 def generate_content_calendar(
     strategy: dict,
     campaign_name: str,
@@ -244,7 +289,7 @@ def generate_content_calendar(
 
             calendar = clean_calendar(calendar)
 
-            calendar = enforce_format_diversity(
+            calendar = enforce_media_mix(
                 calendar
             )
 

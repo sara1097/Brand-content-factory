@@ -1,5 +1,7 @@
 venv/
 .venv/
+agent_env/
+INSTRUCTOR_ENV/
 
 __pycache__/
 *.pyc

@@ -1,24 +1,24 @@
 # LLM client (Groq cloud API -- qwen/llama models)
-groq>=0.11.0
+groq==1.5.0
 
 # Web UI
-streamlit>=1.28.0
-
-# Memory / Vector DB (research history)
-chromadb>=0.4.0
+streamlit==1.39.0
 
 # Web research evidence
-ddgs>=6.0.0
+ddgs==9.14.4
 
 # Executive PDF report
-reportlab>=4.0.0
+reportlab==5.0.0
 
 # Utilities
-python-dotenv>=1.0.0
-pydantic>=2.0.0
-pillow>=9.0.0
+python-dotenv==1.0.1
+pydantic==2.9.2
+pillow==10.4.0
 
+# HTTP client (deployed WanGP video generation API on Modal + Magic Hour
+# image generation API)
+requests==2.32.3
 
-
-# HTTP client (deployed WanGP video generation API on Modal)
-requests>=2.31.0
+# Pipeline orchestration (graph/ package: sequential analysis chain +
+# parallel media fan-out)
+langgraph==1.2.8

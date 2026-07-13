@@ -17,6 +17,7 @@ No storyboard, no per-scene prompts, no video stitching, and the two
 videos are not the same prompt reused with different seeds -- they come
 from two distinct prompts.
 """
+from agents.content_calendar import days_by_media_type
 from agents.prompt_agent import generate_video_prompts
 from config import QWEN_MODEL, WANGP_NUM_VARIANTS
 from models.wangp_client import WanGPClientError, generate_video_variants
@@ -66,6 +67,12 @@ def generate_video_assets(
     if not description or not description.strip():
         return {"error": "A product description is required to generate a video."}
 
+    # When the calendar declares video days (media_type == "video"), each
+    # rendered video belongs to one of those days -- the prompts are
+    # written from those posts and the variants are tagged with the day.
+    video_days = days_by_media_type(content or {}, "video")[:WANGP_NUM_VARIANTS]
+    day_numbers = [day.get("day") for day in video_days]
+
     try:
         prompts = generate_video_prompts(
             description=description,
@@ -74,11 +81,14 @@ def generate_video_assets(
             content=content,
             model=QWEN_MODEL,
             num_prompts=WANGP_NUM_VARIANTS,
+            days=video_days or None,
+            has_reference_image=bool(image_path),
         )
 
         print(f"\n[VideoAgent] Qwen generated {len(prompts)} distinct video prompt(s):")
         for i, prompt in enumerate(prompts, start=1):
-            print(f"[VideoAgent]   Prompt {i}: {prompt}")
+            day_label = f" (day {day_numbers[i - 1]})" if i <= len(day_numbers) else ""
+            print(f"[VideoAgent]   Prompt {i}{day_label}: {prompt}")
 
         variants = generate_video_variants(
             prompts=prompts,
@@ -90,8 +100,12 @@ def generate_video_assets(
     except Exception as exc:
         return {"error": str(exc)}
 
+    for i, variant in enumerate(variants):
+        variant["day"] = day_numbers[i] if i < len(day_numbers) else None
+
     return {
         "prompts": prompts,
+        "days": day_numbers,
         "image_used": bool(image_path),
         "num_variants": len(variants),
         "variants": variants,
