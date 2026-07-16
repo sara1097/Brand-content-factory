@@ -81,8 +81,6 @@ def generate_video_assets(
             content=content,
             model=QWEN_MODEL,
             num_prompts=WANGP_NUM_VARIANTS,
-            days=video_days or None,
-            has_reference_image=bool(image_path),
         )
 
         print(f"\n[VideoAgent] Qwen generated {len(prompts)} distinct video prompt(s):")

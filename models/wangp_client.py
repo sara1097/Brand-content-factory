@@ -154,6 +154,7 @@ def _wait_for_job(
     deadline = time.time() + WANGP_MAX_WAIT_SECONDS
     poll_count = 0
     last_logged_pct = None
+    max_pct_seen = 0
 
     def _notify(pct, status, phase):
         if on_progress is None:
@@ -184,6 +185,15 @@ def _wait_for_job(
         progress = job.get("progress") or {}
         pct = progress.get("progress")
         phase = progress.get("phase")
+
+        current_step = progress.get("current_step")
+        total_steps = progress.get("total_steps")
+
+        if pct is not None:
+            if current_step and total_steps and total_steps > 0:
+                pct = int(((current_step - 1) * 100 + pct) / total_steps)
+            max_pct_seen = max(max_pct_seen, pct)
+            pct = max_pct_seen
 
         _notify(pct, status, phase)
 
