@@ -1,4 +1,4 @@
-# 📊 Brand Content Factory — Enterprise AI Marketing Intelligence Platform (Qwen Edition)
+# 📊 Brand Content Factory — Enterprise AI Marketing Intelligence Platform (Qwen Edition) 
 
 An end-to-end **multi-agent AI pipeline** that turns a plain product description (plus an optional product image) into a complete, ready-to-use marketing package: product intelligence, live market research, a full marketing strategy, a **7-day content calendar with the media already generated** (2 AI videos + 4 AI images + 1 text-only post), ad copy variants, a compliance review, and an exportable executive report (PDF / JSON / TXT).
 
