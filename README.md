@@ -12,7 +12,7 @@ Built with **Python + Streamlit**, orchestrated with **LangGraph**, powered by *
 
 > 🟢 **The project is fully portable — no matter where you place or clone this folder, just create a fresh Python environment inside it and run.** Requires **Python 3.11+** ([download](https://www.python.org/downloads/)).
 
-### Windows (PowerShell / CMD)
+### Windows (PowerShell/CMD)
 ```powershell
 # 1. From the project root, create and activate a fresh environment
 python -m venv .venv
